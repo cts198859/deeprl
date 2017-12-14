@@ -234,9 +234,6 @@ class Cnn1DPolicy(Policy):
             recent_dones = np.copy(self.recent_dones_bw)
         comb_obs = np.vstack([recent_obs, obs])
         comb_dones = np.concatenate([recent_dones, dones])
-        if ob_type == 'backward':
-            print(comb_obs)
-            print(comb_dones)
         new_obs = []
         inds = list(np.nonzero(comb_dones)[0])
         for i in range(num_obs):
