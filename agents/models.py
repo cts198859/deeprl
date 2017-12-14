@@ -23,11 +23,11 @@ class A2C:
         gamma = model_config.getfloat('GAMMA')
         n_step = model_config.getint('NUM_STEP')
         n_past = model_config.getint('NUM_PAST')
+        n_fc = model_config.get('NUM_FC').split(',')
+        n_fc = [int(x) for x in n_fc]
 
         if policy == 'lstm':
-            n_lstm = model_config.getint('NUM_LSTM')
-            n_fc = model_config.get('NUM_FC').split(',')
-            n_fc = [int(x) for x in n_fc]
+            n_lstm = model_config.getint('NUM_LSTM')  
             self.policy = LstmPolicy(n_s, n_a, n_step, i_thread, n_past, n_fc=n_fc, n_lstm=n_lstm)
         elif policy == 'cnn1':
             n_filter = model_config.getint('NUM_FILTER')
