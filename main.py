@@ -11,6 +11,7 @@ from agents.models import A2C
 from envs.wrapper import GymEnv
 from train import Trainer, AsyncTrainer
 
+
 class GlobalCounter:
     def __init__(self, total_step, save_step, log_step):
         self.counter = itertools.count(1)
@@ -100,7 +101,9 @@ def gym_env():
     save_path, log_path = init_out_dir(base_dir)
 
     tf.set_random_seed(seed)
-    config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
+    config = tf.ConfigProto(allow_soft_placement=True,
+                            intra_op_parallelism_threads=num_env,
+                            inter_op_parallelism_threads=num_env)
     sess = tf.Session(config=config)
     global_model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
     saver = tf.train.Saver(max_to_keep=20)
