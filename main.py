@@ -112,8 +112,8 @@ def gym_env():
         for i in range(num_env):
             env = GymEnv(env_name)
             env.seed(seed + i)
-            trainer = AsyncTrainer(env, models[i], lr_scheduler, beta_scheduler, summary_writer,
-                                   i, global_counter, save_path)
+            trainer = AsyncTrainer(env, models[i], save_path, summary_writer, global_counter,
+                                   i, lr_scheduler, beta_scheduler)
             trainers.append(trainer)
 
     sess.run(tf.global_variables_initializer())
