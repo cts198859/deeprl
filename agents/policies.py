@@ -64,6 +64,7 @@ class Policy:
             self._train = self.optimizer.apply_gradients(list(zip(grads, wts)))
         else:
             # local policy
+            self.optimizer = None
             global_name = self.name.split('_')[0] + '_' + str(-1)
             global_wts = tf.trainable_variables(scope=global_name)
             self._train = optimizer.apply_gradients(list(zip(grads, global_wts)))

@@ -101,6 +101,7 @@ class AsyncTrainer(Trainer):
         cum_reward = 0
         cum_actions = []
         while not coord.should_stop():
+            sess.run(self.model.policy.sync_wt)
             ob, done, R, cum_reward, cum_actions = self.explore(sess, ob, done, cum_reward, cum_actions)
             cur_lr = self.lr_scheduler.get(self.n_step)
             cur_beta = self.beta_scheduler.get(self.n_step)

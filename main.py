@@ -9,7 +9,7 @@ import threading
 
 from agents.models import A2C
 from envs.wrapper import GymEnv
-from train import Trainer
+from train import Trainer, AsyncTrainer
 
 class GlobalCounter:
     def __init__(self, total_step, save_step, log_step):
@@ -62,11 +62,12 @@ def init_out_dir(base_dir):
     return save_path, log_path
 
 
-def single_gym_env():
+def gym_env():
     args = parse_args()
     parser = configparser.ConfigParser()
     parser.read(args.config_path)
     seed = parser.getint('TRAIN_CONFIG', 'SEED')
+    num_env = parser.getint('TRAIN_CONFIG', 'NUM_ENV')
     env_name = parser.get('ENV_CONFIG', 'NAME')
     env = GymEnv(env_name)
     env.seed(seed)
@@ -81,28 +82,50 @@ def single_gym_env():
     tf.set_random_seed(seed)
     config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
     sess = tf.Session(config=config)
-    model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
-    saver = tf.train.Saver(max_to_keep=50)
-    model.load(saver, save_path)
+    global_model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
+    saver = tf.train.Saver(max_to_keep=20)
+    global_model.load(saver, save_path)
     global_counter = GlobalCounter(total_step, save_step, log_step)
-    trainer = Trainer(env, model, save_path, log_path, global_counter)
     coord = tf.train.Coordinator()
     threads = []
+    trainers = []
 
-    def trainer_fn():
-        trainer.run(sess, saver, coord)
+    def train_fn(i_thread):
+        trainers[i_thread].run(sess, saver, coord)
 
-    thread = threading.Thread(target=trainer_fn)
-    thread.start()
-    threads.append(thread)
+    if num_env == 1:
+        # regular training
+        trainer = Trainer(env, global_model, save_path, log_path, global_counter)
+        trainers.append(trainer)
+    else:
+        # asynchronous training
+        lr_scheduler = global_model.lr_scheduler
+        beta_scheduler = global_model.beta_scheduler
+        optimizer = global_model.optimizer
+        summary_writer = tf.summary.FileWriter(log_path)
+        for i in range(num_env):
+            env = GymEnv(env_name)
+            env.seed(seed + i)
+            model = A2C(sess, n_s, n_a, total_step, i_thread=i, optimizer=optimizer,
+                        model_config=parser['MODEL_CONFIG'])
+            trainer = AsyncTrainer(env, model, lr_scheduler, beta_scheduler, summary_writer,
+                                   i, global_counter, save_path)
+
+    sess.run(tf.global_variables_initializer())
+
+    for i in range(num_env):
+        thread = threading.Thread(target=train_fn, args=(i,))
+        thread.start()
+        threads.append(thread)
     signal.signal(signal.SIGINT, signal_handler)
     signal.pause()
     coord.request_stop()
     coord.join(threads)
     save_flag = input('save final model? Y/N: ')
     if save_flag.lower().startswith('y'):
-        print('saving model at step %d ...' % trainer.cur_step)
-        model.save(saver, save_path + 'step', trainer.cur_step)
+        print('saving model at step %d ...' % global_counter.cur_step)
+        model.save(saver, save_path + 'step', global_counter.cur_step)
+
 
 if __name__ == '__main__':
-    single_gym_env()
+    gym_env()

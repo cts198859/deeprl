@@ -1,6 +1,4 @@
-import numpy as np
 import os
-import tensorflow as tf
 from agents.utils import *
 from agents.policies import *
 
@@ -35,7 +33,6 @@ class A2C:
                                       n_fc=n_fc, n_filter=n_filter, m_filter=m_filter)
         self.name = self.policy.name
         self.policy.prepare_loss(optimizer, v_coef, max_grad_norm, alpha, epsilon)
-        sess.run(tf.global_variables_initializer())
 
         if i_thread == -1:
             self.lr_scheduler = Scheduler(lr_init, lr_min, total_step, decay=lr_decay)
@@ -80,4 +77,5 @@ class A2C:
         self.backward = backward
         self.forward = forward
         self.n_step = n_step
+        self.optimizer = self.policy.optimizer
         self.add_transition = self.trans_buffer.add_transition
