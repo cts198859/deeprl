@@ -103,11 +103,12 @@ def gym_env():
         lr_scheduler = global_model.lr_scheduler
         beta_scheduler = global_model.beta_scheduler
         optimizer = global_model.optimizer
+        lr = global_model.lr
         models = []
         # initialize model to update graph
         for i in range(num_env):
             models.append(A2C(sess, n_s, n_a, total_step, i_thread=i, optimizer=optimizer,
-                              model_config=parser['MODEL_CONFIG']))
+                              lr=lr, model_config=parser['MODEL_CONFIG']))
         summary_writer = tf.summary.FileWriter(log_path, sess.graph)
         for i in range(num_env):
             env = GymEnv(env_name)

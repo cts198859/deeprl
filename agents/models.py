@@ -4,7 +4,7 @@ from agents.policies import *
 
 
 class A2C:
-    def __init__(self, sess, n_s, n_a, total_step, i_thread=-1, optimizer=None, model_config=None):
+    def __init__(self, sess, n_s, n_a, total_step, i_thread=-1, optimizer=None, lr=None, model_config=None):
         policy = model_config.get('POLICY')
         v_coef = model_config.getfloat('VALUE_COEF')
         max_grad_norm = model_config.getfloat('MAX_GRAD_NORM')
@@ -32,7 +32,7 @@ class A2C:
             self.policy = Cnn1DPolicy(n_s, n_a, n_step, i_thread, n_past,
                                       n_fc=n_fc, n_filter=n_filter, m_filter=m_filter)
         self.name = self.policy.name
-        self.policy.prepare_loss(optimizer, v_coef, max_grad_norm, alpha, epsilon)
+        self.policy.prepare_loss(optimizer, lr, v_coef, max_grad_norm, alpha, epsilon)
 
         if i_thread == -1:
             self.lr_scheduler = Scheduler(lr_init, lr_min, total_step, decay=lr_decay)
@@ -78,4 +78,5 @@ class A2C:
         self.forward = forward
         self.n_step = n_step
         self.optimizer = self.policy.optimizer
+        self.lr = self.policy.lr
         self.add_transition = self.trans_buffer.add_transition

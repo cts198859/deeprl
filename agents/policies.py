@@ -39,11 +39,10 @@ class Policy:
             return out_values[0]
         return out_values
 
-    def prepare_loss(self, optimizer, v_coef, max_grad_norm, alpha, epsilon):
+    def prepare_loss(self, optimizer, lr, v_coef, max_grad_norm, alpha, epsilon):
         self.A = tf.placeholder(tf.int32, [self.n_step])
         self.ADV = tf.placeholder(tf.float32, [self.n_step])
         self.R = tf.placeholder(tf.float32, [self.n_step])
-        self.lr = tf.placeholder(tf.float32, [])
         self.entropy_coef = tf.placeholder(tf.float32, [])
         A_sparse = tf.one_hot(self.A, self.n_a)
 
@@ -60,10 +59,12 @@ class Policy:
             grads, self.grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
         if optimizer is None:
             # global policy
+            self.lr = tf.placeholder(tf.float32, [])
             self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr, decay=alpha, epsilon=epsilon)
             self._train = self.optimizer.apply_gradients(list(zip(grads, wts)))
         else:
             # local policy
+            self.lr = lr
             self.optimizer = None
             global_name = self.name.split('_')[0] + '_' + str(-1)
             global_wts = tf.trainable_variables(scope=global_name)
