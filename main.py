@@ -79,7 +79,7 @@ def init_model_summary():
     summaries.append(tf.summary.scalar('train/beta', beta))
     summaries.append(tf.summary.scalar('train/gradnorm', gradnorm))
     summary = tf.summary.merge(summaries)
-    return (summary, entropy_loss, policy_loss, total_loss, lr, beta, gradnorm)
+    return (summary, entropy_loss, policy_loss, value_loss, total_loss, lr, beta, gradnorm)
 
 
 def gym_env():
