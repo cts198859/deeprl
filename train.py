@@ -36,7 +36,7 @@ class Trainer:
             next_ob, reward, done, _ = self.env.step(action)
             cum_actions.append(action)
             cum_reward += reward
-            global_step = next(self.global_counter)
+            global_step = self.global_counter.next()
             self.cur_step += 1
             self.model.add_transition(ob, action, reward, value, done)
             # logging
