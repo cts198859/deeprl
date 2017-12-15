@@ -1,5 +1,6 @@
 import argparse
 import configparser
+import itertools
 import numpy as np
 import os
 import signal
@@ -9,6 +10,32 @@ import threading
 from agents.models import A2C
 from envs.wrapper import GymEnv
 from train import Trainer
+
+class GlobalCounter:
+    def __init__(self, total_step, save_step, log_step):
+        self.counter = itertools.count(1)
+        self.cur_step = 0
+        self.cur_save_step = 0
+        self.total_step = total_step
+        self.save_step = save_step
+        self.log_step = log_step
+
+    def next(self):
+        self.cur_step = next(self.counter)
+        return self.cur_step
+
+    def should_save(self):
+        save = False
+        if (self.cur_step - self.cur_save_step) >= self.save_step:
+            save = True
+            self.cur_save_step = self.cur_step
+        return save
+
+    def should_log(self):
+        return (self.cur_step % self.log_step == 0)
+
+    def should_stop(self):
+        return (self.cur_step >= self.total_step)
 
 
 def parse_args():
@@ -57,7 +84,8 @@ def single_gym_env():
     model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
     saver = tf.train.Saver(max_to_keep=50)
     model.load(saver, save_path)
-    trainer = Trainer(env, model, total_step, save_path, log_path, save_step, log_step)
+    global_counter = GlobalCounter(total_step, save_step, log_step)
+    trainer = Trainer(env, model, save_path, log_path, global_counter)
     coord = tf.train.Coordinator()
     threads = []
 

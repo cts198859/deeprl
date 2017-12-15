@@ -6,8 +6,7 @@ from agents.policies import *
 
 
 class A2C:
-    def __init__(self, sess, n_s, n_a, total_step, i_thread=-1, model_config=None):
-        self.name = 'A2C_' + str(i_thread)
+    def __init__(self, sess, n_s, n_a, total_step, i_thread=-1, optimizer=None, model_config=None):
         policy = model_config.get('POLICY')
         v_coef = model_config.getfloat('VALUE_COEF')
         max_grad_norm = model_config.getfloat('MAX_GRAD_NORM')
@@ -34,7 +33,8 @@ class A2C:
             m_filter = model_config.getint('SIZE_FILTER')
             self.policy = Cnn1DPolicy(n_s, n_a, n_step, i_thread, n_past,
                                       n_fc=n_fc, n_filter=n_filter, m_filter=m_filter)
-        self.policy.prepare_loss(v_coef, max_grad_norm, alpha, epsilon)
+        self.name = self.policy.name
+        self.policy.prepare_loss(optimizer, v_coef, max_grad_norm, alpha, epsilon)
         sess.run(tf.global_variables_initializer())
 
         if i_thread == -1:
@@ -44,8 +44,7 @@ class A2C:
         self.trans_buffer = OnPolicyBuffer(gamma)
 
         def save(saver, model_dir, global_step):
-            if i_thread == -1:
-                saver.save(sess, model_dir, global_step=global_step)
+            saver.save(sess, model_dir, global_step=global_step)
 
         def load(saver, model_dir):
             if i_thread == -1:
@@ -65,13 +64,13 @@ class A2C:
                 else:
                     print('could not find old checkpoint')
 
-        def backward(R, cur_lr=None, cur_beta=None, train=True):
+        def backward(R, cur_lr=None, cur_beta=None):
             obs, acts, dones, Rs, Advs = self.trans_buffer.sample_transition(R)
             if cur_lr is None:
                 cur_lr = self.lr_scheduler.get(n_step)
             if cur_beta is None:
                 cur_beta = self.beta_scheduler.get(n_step)
-            return self.policy.backward(sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta, train)
+            return self.policy.backward(sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta)
 
         def forward(ob, done, out_type='pv'):
             return self.policy.forward(sess, ob, done, out_type)

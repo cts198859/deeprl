@@ -39,22 +39,7 @@ class Policy:
             return out_values[0]
         return out_values
 
-    def _get_backward_outs(self, train):
-        outs = [self._summary]
-        if train:
-            outs.append(self._train)
-        else:
-            # return the local grads instead
-            outs.append(self.grads)
-        return outs
-
-    def _return_backward_outs(self, out_values, train):
-        if train:
-            return out_values[0]
-        else:
-            return out_values
-
-    def prepare_loss(self, v_coef, max_grad_norm, alpha, epsilon):
+    def prepare_loss(self, optimizer, v_coef, max_grad_norm, alpha, epsilon):
         self.A = tf.placeholder(tf.int32, [self.n_step])
         self.ADV = tf.placeholder(tf.float32, [self.n_step])
         self.R = tf.placeholder(tf.float32, [self.n_step])
@@ -69,13 +54,20 @@ class Policy:
         value_loss = tf.reduce_mean(tf.square(self.R - self.v)) * 0.5 * v_coef
         self.loss = policy_loss + value_loss + entropy_loss
 
-        wts = tf.trainable_variables()
+        wts = tf.trainable_variables(scope=self.name)
         grads = tf.gradients(self.loss, wts)
         if max_grad_norm > 0:
             grads, self.grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
-        self.grads = list(zip(grads, wts))
-        self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr, decay=alpha, epsilon=epsilon)
-        self._train = self.optimizer.apply_gradients(self.grads)
+        if optimizer is None:
+            # global policy
+            self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr, decay=alpha, epsilon=epsilon)
+            self._train = self.optimizer.apply_gradients(list(zip(grads, wts)))
+        else:
+            # local policy
+            global_name = self.name.split('_')[0] + '_' + str(-1)
+            global_wts = tf.trainable_variables(scope=global_name)
+            self._train = optimizer.apply_gradients(list(zip(grads, global_wts)))
+            self.sync_wt = self._sync_wt(global_wts, wts)
 
         self.summaries.append(tf.summary.scalar('loss/entropy', entropy_loss))
         self.summaries.append(tf.summary.scalar('loss/policy', policy_loss))
@@ -85,6 +77,13 @@ class Policy:
         self.summaries.append(tf.summary.scalar('train/beta', self.entropy_coef))
         self.summaries.append(tf.summary.scalar('train/gradnorm', self.grad_norm))
         self._summary = tf.summary.merge(self.summaries)
+
+    @staticmethod
+    def _sync_wt(global_wt, local_wt):
+        sync_ops = []
+        for w1, w2 in zip(global_wt, local_wt):
+            sync_ops.append(tf.assign(w2, w1))
+        return tf.group(*sync_ops)
 
 
 class LstmPolicy(Policy):
@@ -159,18 +158,18 @@ class LstmPolicy(Policy):
             self.cur_step = 0
         return self._return_forward_outs(out_values)
 
-    def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta, train=True):
-        outs = self._get_backward_outs(train)
-        out_values = sess.run(outs, {self.ob_bw:obs,
-                                     self.done_bw:dones,
-                                     self.states:self.states_bw,
-                                     self.A:acts,
-                                     self.ADV:Advs,
-                                     self.R:Rs,
-                                     self.lr:cur_lr,
-                                     self.entropy_coef:cur_beta})
+    def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta):
+        summary_out, _ = sess.run([self._summary, self._train],
+                                  {self.ob_bw:obs,
+                                   self.done_bw:dones,
+                                   self.states:self.states_bw,
+                                   self.A:acts,
+                                   self.ADV:Advs,
+                                   self.R:Rs,
+                                   self.lr:cur_lr,
+                                   self.entropy_coef:cur_beta})
         self.states_bw = np.copy(self.states_fw)
-        return self._return_backward_outs(out_values, train)
+        return summary_out
 
     def _backward_policy(self, sess, obs, dones):
         pi = sess.run(self.pi, {self.ob_bw:obs, self.done_bw:dones,
@@ -260,16 +259,16 @@ class Cnn1DPolicy(Policy):
         out_values = sess.run(outs, {self.obs:ob})
         return self._return_forward_outs(out_values)
 
-    def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta, train=True):
-        outs = self._get_backward_outs(train)
+    def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta):
         obs = self._recent_ob(np.array(obs), np.array(dones),  ob_type='backward')
-        out_values = sess.run(outs, {self.obs:obs,
-                                     self.A:acts,
-                                     self.ADV:Advs,
-                                     self.R:Rs,
-                                     self.lr:cur_lr,
-                                     self.entropy_coef:cur_beta})
-        return self._return_backward_outs(out_values, train)
+        summary_out, _ = sess.run([self._summary, self._train],
+                                  {self.obs:obs,
+                                   self.A:acts,
+                                   self.ADV:Advs,
+                                   self.R:Rs,
+                                   self.lr:cur_lr,
+                                   self.entropy_coef:cur_beta})
+        return summary_out
 
     def _backward_policy(self, sess, obs, dones):
         obs = self._recent_ob(np.array(obs), np.array(dones),  ob_type='backward')
