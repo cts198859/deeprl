@@ -3,7 +3,7 @@ import tensorflow as tf
 
 
 class Trainer:
-    def __init__(self, env, model, save_path, log_path, global_counter, i_thread=-1):
+    def __init__(self, env, model, save_path, summary_writer, global_counter, i_thread=-1):
         self.cur_step = 0
         self.i_thread = i_thread
         self.global_counter = global_counter
@@ -12,7 +12,7 @@ class Trainer:
         self.model = model
         self.n_step = self.model.n_step
         self._init_summary()
-        self.summary_writer = tf.summary.FileWriter(log_path)
+        self.summary_writer = summary_writer
 
     def _init_summary(self):
         self.total_reward = tf.placeholder(tf.float32, [])
@@ -81,17 +81,9 @@ class Trainer:
 
 
 class AsyncTrainer(Trainer):
-    def __init__(self, env, model, lr_scheduler, beta_scheduler, summary_writer,
-                 i_thread, global_counter, save_path):
-        self.env = env
-        self.model = model
-        self.cur_step = 0
-        self.i_thread = i_thread
-        self.global_counter = global_counter
-        self.save_path = save_path
-        self.n_step = self.model.n_step
-        self._init_summary()
-        self.summary_writer = summary_writer
+    def __init__(self, env, model, save_path, summary_writer, global_counter,
+                 i_thread, lr_scheduler, beta_scheduler):
+        Trainer.__init__(self, env, model, save_path, summary_writer, global_counter, i_thread)
         self.lr_scheduler = lr_scheduler
         self.beta_scheduler = beta_scheduler
 

@@ -95,21 +95,26 @@ def gym_env():
 
     if num_env == 1:
         # regular training
-        trainer = Trainer(env, global_model, save_path, log_path, global_counter)
+        summary_writer = tf.summary.FileWriter(log_path, sess.graph)
+        trainer = Trainer(env, global_model, save_path, summary_writer, global_counter)
         trainers.append(trainer)
     else:
         # asynchronous training
         lr_scheduler = global_model.lr_scheduler
         beta_scheduler = global_model.beta_scheduler
         optimizer = global_model.optimizer
-        summary_writer = tf.summary.FileWriter(log_path)
+        models = []
+        # initialize model to update graph
+        for i in range(num_env):
+            models.append(A2C(sess, n_s, n_a, total_step, i_thread=i, optimizer=optimizer,
+                              model_config=parser['MODEL_CONFIG']))
+        summary_writer = tf.summary.FileWriter(log_path, sess.graph)
         for i in range(num_env):
             env = GymEnv(env_name)
             env.seed(seed + i)
-            model = A2C(sess, n_s, n_a, total_step, i_thread=i, optimizer=optimizer,
-                        model_config=parser['MODEL_CONFIG'])
-            trainer = AsyncTrainer(env, model, lr_scheduler, beta_scheduler, summary_writer,
+            trainer = AsyncTrainer(env, models[i], lr_scheduler, beta_scheduler, summary_writer,
                                    i, global_counter, save_path)
+            trainers.append(trainer)
 
     sess.run(tf.global_variables_initializer())
 
@@ -124,7 +129,7 @@ def gym_env():
     save_flag = input('save final model? Y/N: ')
     if save_flag.lower().startswith('y'):
         print('saving model at step %d ...' % global_counter.cur_step)
-        model.save(saver, save_path + 'step', global_counter.cur_step)
+        global_model.save(saver, save_path + 'step', global_counter.cur_step)
 
 
 if __name__ == '__main__':
