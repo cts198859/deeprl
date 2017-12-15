@@ -4,7 +4,8 @@ from agents.policies import *
 
 
 class A2C:
-    def __init__(self, sess, n_s, n_a, total_step, i_thread=-1, optimizer=None, lr=None, model_config=None):
+    def __init__(self, sess, n_s, n_a, total_step, i_thread=-1, optimizer=None, lr=None,
+                 model_config=None):
         policy = model_config.get('POLICY')
         v_coef = model_config.getfloat('VALUE_COEF')
         max_grad_norm = model_config.getfloat('MAX_GRAD_NORM')
@@ -61,12 +62,8 @@ class A2C:
                 else:
                     print('could not find old checkpoint')
 
-        def backward(R, cur_lr=None, cur_beta=None):
+        def backward(R, cur_lr, cur_beta):
             obs, acts, dones, Rs, Advs = self.trans_buffer.sample_transition(R)
-            if cur_lr is None:
-                cur_lr = self.lr_scheduler.get(n_step)
-            if cur_beta is None:
-                cur_beta = self.beta_scheduler.get(n_step)
             return self.policy.backward(sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta)
 
         def forward(ob, done, out_type='pv'):

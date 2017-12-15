@@ -70,15 +70,7 @@ class Policy:
             global_wts = tf.trainable_variables(scope=global_name)
             self._train = optimizer.apply_gradients(list(zip(grads, global_wts)))
             self.sync_wt = self._sync_wt(global_wts, wts)
-
-        self.summaries.append(tf.summary.scalar('loss/entropy', entropy_loss))
-        self.summaries.append(tf.summary.scalar('loss/policy', policy_loss))
-        self.summaries.append(tf.summary.scalar('loss/value', value_loss))
-        self.summaries.append(tf.summary.scalar('loss/total', self.loss))
-        self.summaries.append(tf.summary.scalar('train/lr', self.lr))
-        self.summaries.append(tf.summary.scalar('train/beta', self.entropy_coef))
-        self.summaries.append(tf.summary.scalar('train/gradnorm', self.grad_norm))
-        self._summary = tf.summary.merge(self.summaries)
+        self.train_out = [entropy_loss, policy_loss, value_loss, self.loss, self.grad_norm]
 
     @staticmethod
     def _sync_wt(global_wt, local_wt):
@@ -99,7 +91,6 @@ class LstmPolicy(Policy):
         self.ob_bw = tf.placeholder(tf.float32, [n_step, n_s]) # backward n-step
         self.done_bw = tf.placeholder(tf.float32, [n_step])
         self.states = tf.placeholder(tf.float32, [2, n_lstm * 2])
-        self.summaries = []
         with tf.variable_scope(self.name):
             # pi and v use separate nets 
             self.pi_fw, pi_state = self._build_net(n_fc, 'forward', 'pi')
@@ -110,14 +101,17 @@ class LstmPolicy(Policy):
         with tf.variable_scope(self.name, reuse=True):
             self.pi, _ = self._build_net(n_fc, 'backward', 'pi')
             self.v, _ = self._build_net(n_fc, 'backward', 'v')
-            lstm_pi_w = tf.get_variable('pi_lstm/wx')
-            lstm_v_w = tf.get_variable('v_lstm/wx')
-            fc_pi_w = tf.get_variable('pi_fc0/w')
-            fc_v_w = tf.get_variable('v_fc0/w')
-        self.summaries.append(tf.summary.histogram('wt/lstm_pi', tf.reshape(lstm_pi_w, [-1])))
-        self.summaries.append(tf.summary.histogram('wt/lstm_v', tf.reshape(lstm_v_w, [-1])))
-        self.summaries.append(tf.summary.histogram('wt/fc_pi', tf.reshape(fc_pi_w, [-1])))
-        self.summaries.append(tf.summary.histogram('wt/fc_v', tf.reshape(fc_v_w, [-1])))
+            if i_thread == -1:
+                summaries = []
+                lstm_pi_w = tf.get_variable('pi_lstm/wx')
+                lstm_v_w = tf.get_variable('v_lstm/wx')
+                fc_pi_w = tf.get_variable('pi_fc0/w')
+                fc_v_w = tf.get_variable('v_fc0/w')
+                summaries.append(tf.summary.histogram('wt/lstm_pi', tf.reshape(lstm_pi_w, [-1])))
+                summaries.append(tf.summary.histogram('wt/lstm_v', tf.reshape(lstm_v_w, [-1])))
+                summaries.append(tf.summary.histogram('wt/fc_pi', tf.reshape(fc_pi_w, [-1])))
+                summaries.append(tf.summary.histogram('wt/fc_v', tf.reshape(fc_v_w, [-1])))
+                self.summary = tf.summary.merge(summaries)
         self._reset()
 
     def _build_net(self, n_fc, in_type, out_type):
@@ -161,7 +155,7 @@ class LstmPolicy(Policy):
         return self._return_forward_outs(out_values)
 
     def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta):
-        summary_out, _ = sess.run([self._summary, self._train],
+        summary_out = sess.run(self.train_out + [self._train],
                                   {self.ob_bw:obs,
                                    self.done_bw:dones,
                                    self.states:self.states_bw,
@@ -171,7 +165,7 @@ class LstmPolicy(Policy):
                                    self.lr:cur_lr,
                                    self.entropy_coef:cur_beta})
         self.states_bw = np.copy(self.states_fw)
-        return summary_out
+        return summary_out[:-1]
 
     def _backward_policy(self, sess, obs, dones):
         pi = sess.run(self.pi, {self.ob_bw:obs, self.done_bw:dones,
@@ -196,20 +190,22 @@ class Cnn1DPolicy(Policy):
         self.n_filter = n_filter
         self.m_filter = m_filter
         self.obs = tf.placeholder(tf.float32, [None, n_past, n_s])
-        self.summaries = []
         with tf.variable_scope(self.name):
             # pi and v use separate nets 
             self.pi = self._build_net(n_fc, 'pi')
             self.v = self._build_net(n_fc, 'v')
-        with tf.variable_scope(self.name, reuse=True):
-            conv1_pi_w = tf.get_variable('pi_conv1/w')
-            conv1_v_w = tf.get_variable('v_conv1/w')
-            fc_pi_w = tf.get_variable('pi_fc0/w')
-            fc_v_w = tf.get_variable('v_fc0/w')
-        self.summaries.append(tf.summary.histogram('wt/conv1_pi', tf.reshape(conv1_pi_w, [-1])))
-        self.summaries.append(tf.summary.histogram('wt/conv1_v', tf.reshape(conv1_v_w, [-1])))
-        self.summaries.append(tf.summary.histogram('wt/fc_pi', tf.reshape(fc_pi_w, [-1])))
-        self.summaries.append(tf.summary.histogram('wt/fc_v', tf.reshape(fc_v_w, [-1])))
+        if i_thread == -1:
+            with tf.variable_scope(self.name, reuse=True):
+                summaries = []
+                conv1_pi_w = tf.get_variable('pi_conv1/w')
+                conv1_v_w = tf.get_variable('v_conv1/w')
+                fc_pi_w = tf.get_variable('pi_fc0/w')
+                fc_v_w = tf.get_variable('v_fc0/w')
+                summaries.append(tf.summary.histogram('wt/conv1_pi', tf.reshape(conv1_pi_w, [-1])))
+                summaries.append(tf.summary.histogram('wt/conv1_v', tf.reshape(conv1_v_w, [-1])))
+                summaries.append(tf.summary.histogram('wt/fc_pi', tf.reshape(fc_pi_w, [-1])))
+                summaries.append(tf.summary.histogram('wt/fc_v', tf.reshape(fc_v_w, [-1])))
+                self.summary = tf.summary.merge(summaries)
         self._reset()
 
     def _build_net(self, n_fc, out_type):
@@ -263,14 +259,14 @@ class Cnn1DPolicy(Policy):
 
     def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta):
         obs = self._recent_ob(np.array(obs), np.array(dones),  ob_type='backward')
-        summary_out, _ = sess.run([self._summary, self._train],
+        summary_out = sess.run(self.train_out + [self._train],
                                   {self.obs:obs,
                                    self.A:acts,
                                    self.ADV:Advs,
                                    self.R:Rs,
                                    self.lr:cur_lr,
                                    self.entropy_coef:cur_beta})
-        return summary_out
+        return summary_out[:-1]
 
     def _backward_policy(self, sess, obs, dones):
         obs = self._recent_ob(np.array(obs), np.array(dones),  ob_type='backward')

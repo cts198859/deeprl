@@ -62,6 +62,26 @@ def init_out_dir(base_dir):
     return save_path, log_path
 
 
+def init_model_summary():
+    entropy_loss = tf.placeholder(tf.float32, [])
+    policy_loss = tf.placeholder(tf.float32, [])
+    value_loss = tf.placeholder(tf.float32, [])
+    total_loss = tf.placeholder(tf.float32, [])
+    lr = tf.placeholder(tf.float32, [])
+    beta = tf.placeholder(tf.float32, [])
+    gradnorm = tf.placeholder(tf.float32, [])
+    summaries = []
+    summaries.append(tf.summary.scalar('loss/entropy', entropy_loss))
+    summaries.append(tf.summary.scalar('loss/policy', policy_loss))
+    summaries.append(tf.summary.scalar('loss/value', value_loss))
+    summaries.append(tf.summary.scalar('loss/total', total_loss))
+    summaries.append(tf.summary.scalar('train/lr', lr))
+    summaries.append(tf.summary.scalar('train/beta', beta))
+    summaries.append(tf.summary.scalar('train/gradnorm', gradnorm))
+    summary = tf.summary.merge(summaries)
+    return (summary, entropy_loss, policy_loss, total_loss, lr, beta, gradnorm)
+
+
 def gym_env():
     args = parse_args()
     parser = configparser.ConfigParser()
@@ -89,6 +109,7 @@ def gym_env():
     coord = tf.train.Coordinator()
     threads = []
     trainers = []
+    model_summary = init_model_summary()
 
     def train_fn(i_thread):
         trainers[i_thread].run(sess, saver, coord)
@@ -96,7 +117,7 @@ def gym_env():
     if num_env == 1:
         # regular training
         summary_writer = tf.summary.FileWriter(log_path, sess.graph)
-        trainer = Trainer(env, global_model, save_path, summary_writer, global_counter)
+        trainer = Trainer(env, global_model, save_path, summary_writer, global_counter, model_summary)
         trainers.append(trainer)
     else:
         # asynchronous training
@@ -105,6 +126,8 @@ def gym_env():
         optimizer = global_model.optimizer
         lr = global_model.lr
         models = []
+        wt_summary = global_model.policy.summary
+        reward_summary = None
         # initialize model to update graph
         for i in range(num_env):
             models.append(A2C(sess, n_s, n_a, total_step, i_thread=i, optimizer=optimizer,
@@ -114,7 +137,10 @@ def gym_env():
             env = GymEnv(env_name)
             env.seed(seed + i)
             trainer = AsyncTrainer(env, models[i], save_path, summary_writer, global_counter,
-                                   i, lr_scheduler, beta_scheduler)
+                                   i, lr_scheduler, beta_scheduler, model_summary, wt_summary,
+                                   reward_summary=reward_summary)
+            if i == 0:
+                reward_summary = (trainer.reward_summary, trainer.total_reward)
             trainers.append(trainer)
 
     sess.run(tf.global_variables_initializer())
