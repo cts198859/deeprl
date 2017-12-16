@@ -3,6 +3,7 @@ import configparser
 import itertools
 import numpy as np
 import os
+import signal
 import tensorflow as tf
 import threading
 
@@ -44,6 +45,10 @@ def parse_args():
     parser.add_argument('--config-path', type=str, required=False,
                         default=default_config_path, help="config path")
     return parser.parse_args()
+
+
+def signal_handler(signal, frame):
+    print('You pressed Ctrl+C!')
 
 
 def init_out_dir(base_dir):
@@ -96,7 +101,9 @@ def gym_env():
     save_path, log_path = init_out_dir(base_dir)
 
     tf.set_random_seed(seed)
-    config = tf.ConfigProto(allow_soft_placement=True)
+    config = tf.ConfigProto(allow_soft_placement=True,
+                            intra_op_parallelism_threads=num_env,
+                            inter_op_parallelism_threads=num_env)
     sess = tf.Session(config=config)
     global_model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
     saver = tf.train.Saver(max_to_keep=20)
@@ -140,16 +147,14 @@ def gym_env():
             trainers.append(trainer)
 
     sess.run(tf.global_variables_initializer())
-    try:
-        for i in range(num_env):
-            thread = threading.Thread(target=train_fn, args=(i,))
-            thread.start()
-            threads.append(thread)
-    except KeyboardInterrupt:
-        print('you pressed Ctrl+C')
-        coord.request_stop()
-    except:
-        raise
+
+    for i in range(num_env):
+        thread = threading.Thread(target=train_fn, args=(i,))
+        thread.start()
+        threads.append(thread)
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.pause()
+    coord.request_stop()
     coord.join(threads)
     save_flag = input('save final model? Y/N: ')
     if save_flag.lower().startswith('y'):
