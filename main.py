@@ -140,10 +140,16 @@ def gym_env():
             trainers.append(trainer)
 
     sess.run(tf.global_variables_initializer())
-    for i in range(num_env):
-        thread = threading.Thread(target=train_fn, args=(i,))
-        thread.start()
-        threads.append(thread)
+    try:
+        for i in range(num_env):
+            thread = threading.Thread(target=train_fn, args=(i,))
+            thread.start()
+            threads.append(thread)
+    except KeyboardInterrupt:
+        print('you pressed Ctrl+C')
+        coord.request_stop()
+    except:
+        raise
     coord.join(threads)
     save_flag = input('save final model? Y/N: ')
     if save_flag.lower().startswith('y'):

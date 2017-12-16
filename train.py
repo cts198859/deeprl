@@ -87,31 +87,26 @@ class Trainer:
         done = False
         cum_reward = 0
         cum_actions = []
-        try:
-            while not coord.should_stop():
-                ob, done, R, cum_reward, cum_actions = self.explore(sess, ob, done, cum_reward, cum_actions)
-                cur_lr = self.model.lr_scheduler.get(self.n_step)
-                cur_beta = self.model.beta_scheduler.get(self.n_step)
-                entropy_loss, policy_loss, value_loss, total_loss, gradnorm = \
-                    self.model.backward(R, cur_lr, cur_beta)
-                global_step = self.global_counter.cur_step
-                self._add_model_summary(sess, entropy_loss, policy_loss, value_loss,
-                                        total_loss, gradnorm, cur_lr, cur_beta, global_step)
-                summ = sess.run(self.model.policy.summary)
-                self.summary_writer.add_summary(summ, global_step=global_step)
-                self.summary_writer.flush()
-                # save model
-                if self.global_counter.should_save():
-                    print('saving model at step %d ...' % global_step)
-                    self.model.save(saver, self.save_path + 'step', global_step)
-                if (self.global_counter.should_stop()) and (not coord.should_stop()):
-                    coord.request_stop()
-                    print('max step reached!')
-                    return
-        except KeyboardInterrupt:
-            print('you pressed Ctrl+C!')
-            coord.request_stop()
-            return
+        while not coord.should_stop():
+            ob, done, R, cum_reward, cum_actions = self.explore(sess, ob, done, cum_reward, cum_actions)
+            cur_lr = self.model.lr_scheduler.get(self.n_step)
+            cur_beta = self.model.beta_scheduler.get(self.n_step)
+            entropy_loss, policy_loss, value_loss, total_loss, gradnorm = \
+                self.model.backward(R, cur_lr, cur_beta)
+            global_step = self.global_counter.cur_step
+            self._add_model_summary(sess, entropy_loss, policy_loss, value_loss,
+                                    total_loss, gradnorm, cur_lr, cur_beta, global_step)
+            summ = sess.run(self.model.policy.summary)
+            self.summary_writer.add_summary(summ, global_step=global_step)
+            self.summary_writer.flush()
+            # save model
+            if self.global_counter.should_save():
+                print('saving model at step %d ...' % global_step)
+                self.model.save(saver, self.save_path + 'step', global_step)
+            if self.global_counter.should_stop():
+                coord.request_stop()
+                print('max step reached, press Ctrl+C to end program ...')
+                return
 
 
 class AsyncTrainer(Trainer):
@@ -153,29 +148,24 @@ class AsyncTrainer(Trainer):
         done = False
         cum_reward = 0
         cum_actions = []
-        try:
-            while not coord.should_stop():
-                sess.run(self.model.policy.sync_wt)
-                ob, done, R, cum_reward, cum_actions = self.explore(sess, ob, done, cum_reward, cum_actions)
-                cur_lr = self.lr_scheduler.get(self.n_step)
-                cur_beta = self.beta_scheduler.get(self.n_step)
-                entropy_loss, policy_loss, value_loss, total_loss, gradnorm = \
-                    self.model.backward(R, cur_lr, cur_beta)
-                global_step = self.global_counter.cur_step
-                self._add_model_summary(sess, entropy_loss, policy_loss, value_loss,
-                                        total_loss, gradnorm, cur_lr, cur_beta, global_step)
-                summ = sess.run(self.wt_summary)
-                self.summary_writer.add_summary(summ, global_step=global_step)
-                self.summary_writer.flush()
-                # save model
-                if self.global_counter.should_save():
-                    print('saving model at step %d ...' % global_step)
-                    self.model.save(saver, self.save_path + 'step', global_step)
-                if (self.global_counter.should_stop()) and (not coord.should_stop()):
-                    coord.request_stop()
-                    print('max step reached!')
-                    return
-        except KeyboardInterrupt:
-            print('you pressed Ctrl+C!')
-            coord.request_stop()
-            return
+        while not coord.should_stop():
+            sess.run(self.model.policy.sync_wt)
+            ob, done, R, cum_reward, cum_actions = self.explore(sess, ob, done, cum_reward, cum_actions)
+            cur_lr = self.lr_scheduler.get(self.n_step)
+            cur_beta = self.beta_scheduler.get(self.n_step)
+            entropy_loss, policy_loss, value_loss, total_loss, gradnorm = \
+                self.model.backward(R, cur_lr, cur_beta)
+            global_step = self.global_counter.cur_step
+            self._add_model_summary(sess, entropy_loss, policy_loss, value_loss,
+                                    total_loss, gradnorm, cur_lr, cur_beta, global_step)
+            summ = sess.run(self.wt_summary)
+            self.summary_writer.add_summary(summ, global_step=global_step)
+            self.summary_writer.flush()
+            # save model
+            if self.global_counter.should_save():
+                print('saving model at step %d ...' % global_step)
+                self.model.save(saver, self.save_path + 'step', global_step)
+            if self.global_counter.should_stop():
+                print('max step reached!')
+                coord.request_stop()
+                return
