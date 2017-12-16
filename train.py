@@ -148,13 +148,13 @@ class AsyncTrainer(Trainer):
         summ = sess.run(self.action_summary, {self.actions:cum_actions})
         self.summary_writer.add_summary(summ, global_step=global_step)
 
-    def run(self, sess, saver, stop_signal):
+    def run(self, sess, saver, coord):
         ob = self.env.reset()
         done = False
         cum_reward = 0
         cum_actions = []
         try:
-            while not stop_signal[0]:
+            while not coord.should_stop():
                 sess.run(self.model.policy.sync_wt)
                 ob, done, R, cum_reward, cum_actions = self.explore(sess, ob, done, cum_reward, cum_actions)
                 cur_lr = self.lr_scheduler.get(self.n_step)
@@ -171,11 +171,11 @@ class AsyncTrainer(Trainer):
                 if self.global_counter.should_save():
                     print('saving model at step %d ...' % global_step)
                     self.model.save(saver, self.save_path + 'step', global_step)
-                if (self.global_counter.should_stop()) and (not stop_signal[0]):
-                    stop_signal[0] = True
+                if (self.global_counter.should_stop()) and (not coord.should_stop()):
+                    coord.request_stop()
                     print('max step reached!')
                     return
         except KeyboardInterrupt:
             print('you pressed Ctrl+C!')
-            stop_signal[0] = True
+            coord.request_stop()
             return

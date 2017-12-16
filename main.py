@@ -102,13 +102,13 @@ def gym_env():
     saver = tf.train.Saver(max_to_keep=20)
     global_model.load(saver, save_path)
     global_counter = GlobalCounter(total_step, save_step, log_step)
-    stop_signal = [False]
+    coord = tf.train.Coordinator()
     threads = []
     trainers = []
     model_summary = init_model_summary()
 
     def train_fn(i_thread):
-        trainers[i_thread].run(sess, saver, stop_signal)
+        trainers[i_thread].run(sess, saver, coord)
 
     if num_env == 1:
         # regular training
@@ -144,8 +144,7 @@ def gym_env():
         thread = threading.Thread(target=train_fn, args=(i,))
         thread.start()
         threads.append(thread)
-    for thread in threads:
-        thread.join()
+    coord.join(threads)
     save_flag = input('save final model? Y/N: ')
     if save_flag.lower().startswith('y'):
         print('saving model at step %d ...' % global_counter.cur_step)
