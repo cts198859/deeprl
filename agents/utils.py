@@ -39,12 +39,12 @@ def norm_init(scale=DEFAULT_SCALE, mode=DEFAULT_MODE):
             n = 0.5 * (n_in + shape[-1])
         return (scale * a / np.sqrt(n)).astype(np.float32)
 
-DEFAULT_METHOD = norm_init
+DEFAULT_METHOD = ortho_init
 """
 layers
 """
 def conv(x, scope, n_out, f_size, stride=1, pad='VALID', f_size_w=None, act=tf.nn.relu,
-         conv_dim=1, init_scale=DEFAULT_SCALE, init_mode=None, init_method=ortho_init):
+         conv_dim=1, init_scale=DEFAULT_SCALE, init_mode=None, init_method=DEFAULT_METHOD):
     with tf.variable_scope(scope):
         b = tf.get_variable("b", [n_out], initializer=tf.constant_initializer(0.0))
         if conv_dim == 1:
