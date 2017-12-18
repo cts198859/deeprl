@@ -157,7 +157,7 @@ def gym_env():
     save_flag = input('save final model? Y/N: ')
     if save_flag.lower().startswith('y'):
         print('saving model at step %d ...' % global_counter.cur_step)
-        global_model.save(saver, save_path + 'step', global_counter.cur_step)
+        global_model.save(saver, save_path + 'checkpoint', global_counter.cur_step)
 
 
 if __name__ == '__main__':
