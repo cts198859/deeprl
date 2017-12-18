@@ -76,7 +76,7 @@ class Policy:
     def _sync_wt(global_wt, local_wt):
         sync_ops = []
         for w1, w2 in zip(global_wt, local_wt):
-            sync_ops.append(tf.assign(w2, w1))
+            sync_ops.append(w2.assign(w1))
         return tf.group(*sync_ops)
 
 
