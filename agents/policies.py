@@ -60,7 +60,8 @@ class Policy:
         if optimizer is None:
             # global policy
             self.lr = tf.placeholder(tf.float32, [])
-            self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr, decay=alpha, epsilon=epsilon)
+            self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr, decay=alpha,
+                                                       epsilon=epsilon, use_locking=True)
             self._train = self.optimizer.apply_gradients(list(zip(grads, wts)))
         else:
             # local policy
