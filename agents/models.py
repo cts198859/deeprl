@@ -50,7 +50,7 @@ class A2C:
                 save_step = 0
                 if os.path.exists(model_dir):
                     for file in os.listdir(model_dir):
-                        if file.startswith('step'):
+                        if file.startswith('checkpoint'):
                             prefix = file.split('.')[0]
                             cur_step = int(prefix.split('-')[1])
                             if cur_step > save_step:

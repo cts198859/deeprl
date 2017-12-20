@@ -102,7 +102,7 @@ class Trainer:
             # save model
             if self.global_counter.should_save():
                 print('saving model at step %d ...' % global_step)
-                self.model.save(saver, self.save_path + 'step', global_step)
+                self.model.save(saver, self.save_path + 'checkpoint', global_step)
             if self.global_counter.should_stop():
                 coord.request_stop()
                 print('max step reached, press Ctrl+C to end program ...')
