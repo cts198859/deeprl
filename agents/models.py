@@ -35,7 +35,7 @@ class A2C:
         self.name = self.policy.name
         self.policy.prepare_loss(optimizer, lr, v_coef, max_grad_norm, alpha, epsilon)
 
-        if i_thread == -1:
+        if (i_thread == -1) and (total_step > 0):
             self.lr_scheduler = Scheduler(lr_init, lr_min, total_step, decay=lr_decay)
             self.beta_scheduler = Scheduler(beta_init, beta_min, total_step * beta_ratio,
                                             decay=beta_decay)
@@ -44,18 +44,24 @@ class A2C:
         def save(saver, model_dir, global_step):
             saver.save(sess, model_dir, global_step=global_step)
 
-        def load(saver, model_dir):
+        def load(saver, model_dir, checkpoint=None):
             if i_thread == -1:
                 save_file = None
                 save_step = 0
                 if os.path.exists(model_dir):
-                    for file in os.listdir(model_dir):
-                        if file.startswith('checkpoint'):
-                            prefix = file.split('.')[0]
-                            cur_step = int(prefix.split('-')[1])
-                            if cur_step > save_step:
-                                save_file = prefix
-                                save_step = cur_step
+                    if checkpoint is None:
+                        for file in os.listdir(model_dir):
+                            if file.startswith('checkpoint'):
+                                prefix = file.split('.')[0]
+                                tokens = prefix.split('-')
+                                if len(tokens) != 2:
+                                    continue
+                                cur_step = int(tokens[1])
+                                if cur_step > save_step:
+                                    save_file = prefix
+                                    save_step = cur_step
+                    else:
+                        save_file = 'checkpoint-' + str(int(checkpoint))
                 if save_file is not None:
                     saver.restore(sess, model_dir + save_file)
                     print('checkpoint loaded: ', save_file)
