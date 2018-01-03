@@ -104,16 +104,11 @@ def gym_env():
     config = tf.ConfigProto(allow_soft_placement=True)
     sess = tf.Session(config=config)
     global_model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
-    saver = tf.train.Saver(max_to_keep=20)
-    global_model.load(saver, save_path)
     global_counter = GlobalCounter(total_step, save_step, log_step)
     coord = tf.train.Coordinator()
     threads = []
     trainers = []
     model_summary = init_model_summary()
-
-    def train_fn(i_thread):
-        trainers[i_thread].run(sess, saver, coord)
 
     if num_env == 1:
         # regular training
@@ -145,6 +140,11 @@ def gym_env():
             trainers.append(trainer)
 
     sess.run(tf.global_variables_initializer())
+    saver = tf.train.Saver(max_to_keep=20)
+    global_model.load(saver, save_path)
+
+    def train_fn(i_thread):
+        trainers[i_thread].run(sess, saver, coord)
 
     for i in range(num_env):
         thread = threading.Thread(target=train_fn, args=(i,))
