@@ -14,11 +14,14 @@ class Policy:
     def forward(self, ob, *_args, **_kwargs):
         raise NotImplementedError()
 
-    def _build_fc_net(self, h, n_fc, out_type):
+    def _build_fc_layer(self, h, n_fc):
         h = fc(h, out_type + '_fc0', n_fc[0])
         for i, n_fc_cur in enumerate(n_fc[1:]):
             fc_cur = out_type + '_fc%d' % (i+1)
             h = fc(h, fc_cur, n_fc_cur)
+        return h
+
+    def _build_out_layer(self, h, out_type):
         if out_type == 'pi':
             pi = fc(h, out_type, self.n_a, act=lambda x: x)
             return tf.squeeze(tf.nn.softmax(pi))
@@ -126,8 +129,9 @@ class LstmPolicy(Policy):
             states = self.states[0]
         else:
             states = self.states[1]
-        h, new_states = lstm(ob, done, states, out_type + '_lstm')
-        out_val = self._build_fc_net(h, n_fc, out_type)
+        h = self._build_fc_layer(ob, n_fc)
+        h, new_states = lstm(h, done, states, out_type + '_lstm')
+        out_val = self._build_out_layer(h, out_type)
         return out_val, new_states
 
     def _reset(self):
@@ -213,7 +217,8 @@ class Cnn1DPolicy(Policy):
         h = conv(self.obs, out_type + '_conv1', self.n_filter, self.m_filter, conv_dim=1)
         n_conv_fc = np.prod([v.value for v in h.shape[1:]])
         h = tf.reshape(h, [-1, n_conv_fc])
-        return self._build_fc_net(h, n_fc, out_type)
+        h = self._build_fc_layer(h, n_fc)
+        return self._build_out_layer(h, out_type)
 
     def _reset(self):
         self.recent_obs_fw = np.zeros((self.n_past-1, self.n_s))
