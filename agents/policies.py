@@ -14,7 +14,7 @@ class Policy:
     def forward(self, ob, *_args, **_kwargs):
         raise NotImplementedError()
 
-    def _build_fc_layer(self, h, n_fc):
+    def _build_fc_layer(self, h, n_fc, out_type):
         h = fc(h, out_type + '_fc0', n_fc[0])
         for i, n_fc_cur in enumerate(n_fc[1:]):
             fc_cur = out_type + '_fc%d' % (i+1)
@@ -129,7 +129,7 @@ class LstmPolicy(Policy):
             states = self.states[0]
         else:
             states = self.states[1]
-        h = self._build_fc_layer(ob, n_fc)
+        h = self._build_fc_layer(ob, n_fc, out_type)
         h, new_states = lstm(h, done, states, out_type + '_lstm')
         out_val = self._build_out_layer(h, out_type)
         return out_val, new_states
@@ -217,7 +217,7 @@ class Cnn1DPolicy(Policy):
         h = conv(self.obs, out_type + '_conv1', self.n_filter, self.m_filter, conv_dim=1)
         n_conv_fc = np.prod([v.value for v in h.shape[1:]])
         h = tf.reshape(h, [-1, n_conv_fc])
-        h = self._build_fc_layer(h, n_fc)
+        h = self._build_fc_layer(h, n_fc, out_type)
         return self._build_out_layer(h, out_type)
 
     def _reset(self):
