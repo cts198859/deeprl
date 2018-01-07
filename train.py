@@ -60,6 +60,7 @@ class Trainer:
             else:
                 mu, std, value = self.model.forward(ob, done)
                 action = self.env.sample_action(mu, std)
+                policy = [mu, std]
             next_ob, reward, done, _ = self.env.step(action)
             cum_actions.append(action)
             cum_reward += reward
