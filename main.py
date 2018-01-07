@@ -90,7 +90,7 @@ def gym_env():
     seed = parser.getint('TRAIN_CONFIG', 'SEED')
     num_env = parser.getint('TRAIN_CONFIG', 'NUM_ENV')
     env_name = parser.get('ENV_CONFIG', 'NAME')
-    is_discrete = parser.get('ENV_CONFIG', 'DISCRETE')
+    is_discrete = parser.getboolean('ENV_CONFIG', 'DISCRETE')
     env = GymEnv(env_name, is_discrete)
     env.seed(seed)
     n_a = env.n_a

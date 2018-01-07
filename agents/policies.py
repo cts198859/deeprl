@@ -207,11 +207,11 @@ class LstmPolicy(Policy):
         outs = []
         if 'p' in out_type:
             if self.discrete:
-                outs.append(self.pi)
+                outs.append(self.pi_fw)
             else:
-                outs += self.pi
+                outs += self.pi_fw
         if 'v' in out_type:
-            outs.append(self.v)
+            outs.append(self.v_fw)
         return outs
 
 
