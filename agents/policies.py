@@ -29,7 +29,7 @@ class Policy:
             else: 
                 mu = fc(h, 'mu', self.n_a, act=tf.nn.tanh)
                 #TODO: compare x and sqrt(x)
-                std = fc(h, 'std', self.n_a, act=tf.nn.softplus)
+                std = fc(h, 'std', self.n_a, act=tf.nn.sigmoid)
                 return [tf.squeeze(mu), tf.squeeze(std)]
         else:
             v = fc(h, out_type, 1, act=lambda x: x)

@@ -19,6 +19,7 @@ class A2C:
         beta_decay = model_config.get('ENTROPY_DECAY')
         beta_ratio = model_config.getfloat('ENTROPY_RATIO')
         gamma = model_config.getfloat('GAMMA')
+        reward_clip = model_config.getfloat('REWARD_CLIP')
         n_step = model_config.getint('NUM_STEP')
         n_past = model_config.getint('NUM_PAST')
         n_fc = model_config.get('NUM_FC').split(',')
@@ -78,6 +79,11 @@ class A2C:
         def forward(ob, done, out_type='pv'):
             return self.policy.forward(sess, ob, done, out_type)
 
+        def add_transition(ob, action, reward, value, done):
+            if reward_clip:
+                reward = min(max(reward, -reward_clip), reward_clip)
+            self.trans_buffer.add_transition(ob, action, reward, value, done)
+
         self.save = save
         self.load = load
         self.backward = backward
@@ -85,4 +91,4 @@ class A2C:
         self.n_step = n_step
         self.optimizer = self.policy.optimizer
         self.lr = self.policy.lr
-        self.add_transition = self.trans_buffer.add_transition
+        self.add_transition = add_transition
