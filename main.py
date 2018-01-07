@@ -90,7 +90,8 @@ def gym_env():
     seed = parser.getint('TRAIN_CONFIG', 'SEED')
     num_env = parser.getint('TRAIN_CONFIG', 'NUM_ENV')
     env_name = parser.get('ENV_CONFIG', 'NAME')
-    env = GymEnv(env_name)
+    is_discrete = parser.get('ENV_CONFIG', 'DISCRETE')
+    env = GymEnv(env_name, is_discrete)
     env.seed(seed)
     n_a = env.n_a
     n_s = env.n_s
@@ -103,7 +104,8 @@ def gym_env():
     tf.set_random_seed(seed)
     config = tf.ConfigProto(allow_soft_placement=True)
     sess = tf.Session(config=config)
-    global_model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
+    global_model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'],
+                       discrete=is_discrete)
     global_counter = GlobalCounter(total_step, save_step, log_step)
     coord = tf.train.Coordinator()
     threads = []
@@ -127,10 +129,10 @@ def gym_env():
         # initialize model to update graph
         for i in range(num_env):
             models.append(A2C(sess, n_s, n_a, total_step, i_thread=i, optimizer=optimizer,
-                              lr=lr, model_config=parser['MODEL_CONFIG']))
+                              lr=lr, model_config=parser['MODEL_CONFIG'], discrete=is_discrete))
         summary_writer = tf.summary.FileWriter(log_path, sess.graph)
         for i in range(num_env):
-            env = GymEnv(env_name)
+            env = GymEnv(env_name, is_discrete)
             env.seed(seed + i)
             trainer = AsyncTrainer(env, models[i], save_path, summary_writer, global_counter,
                                    i, lr_scheduler, beta_scheduler, model_summary, wt_summary,

@@ -54,8 +54,12 @@ class Trainer:
         ob = prev_ob
         done = prev_done
         for _ in range(self.n_step):
-            policy, value = self.model.forward(ob, done)
-            action = np.random.choice(np.arange(len(policy)), p=policy)
+            if self.env.discrete:
+                policy, value = self.model.forward(ob, done)
+                action = np.random.choice(np.arange(len(policy)), p=policy)
+            else:
+                mu, std, value = self.model.forward(ob, done)
+                action = self.env.sample_action(mu, std)
             next_ob, reward, done, _ = self.env.step(action)
             cum_actions.append(action)
             cum_reward += reward

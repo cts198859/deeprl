@@ -5,11 +5,14 @@ import bisect
 
 
 class Policy:
-    def __init__(self, n_a, n_s, n_step, n_past):
+    def __init__(self, n_a, n_s, n_step, n_past, discrete):
         self.n_a = n_a
         self.n_s = n_s
         self.n_step = n_step
         self.n_past = n_past
+        self.discrete = discrete
+        if discrete:
+            self._init_a_bound(a_min, a_max)
 
     def forward(self, ob, *_args, **_kwargs):
         raise NotImplementedError()
@@ -20,8 +23,14 @@ class Policy:
             fc_cur = out_type + '_fc%d' % (i+1)
             h = fc(h, fc_cur, n_fc_cur)
         if out_type == 'pi':
-            pi = fc(h, out_type, self.n_a, act=lambda x: x)
-            return tf.squeeze(tf.nn.softmax(pi))
+            if self.discrete:
+                pi = fc(h, out_type, self.n_a, act=tf.nn.softmax)
+                return tf.squeeze(pi)
+            else: 
+                mu = fc(h, 'mu', self.n_a, act=tf.nn.tanh)
+                #TODO: compare x and sqrt(x)
+                std = fc(h, 'std', self.n_a, act=tf.nn.softplus)
+                return [tf.squeeze(mu), tf.squeeze(std)]
         else:
             v = fc(h, out_type, 1, act=lambda x: x)
             return tf.squeeze(v)
@@ -29,7 +38,10 @@ class Policy:
     def _get_forward_outs(self, out_type):
         outs = []
         if 'p' in out_type:
-            outs.append(self.pi)
+            if self.discrete:
+                outs.append(self.pi)
+            else:
+                outs += self.pi
         if 'v' in out_type:
             outs.append(self.v)
         return outs
@@ -39,17 +51,33 @@ class Policy:
             return out_values[0]
         return out_values
 
-    def prepare_loss(self, optimizer, lr, v_coef, max_grad_norm, alpha, epsilon):
-        self.A = tf.placeholder(tf.int32, [self.n_step])
-        self.ADV = tf.placeholder(tf.float32, [self.n_step])
-        self.R = tf.placeholder(tf.float32, [self.n_step])
-        self.entropy_coef = tf.placeholder(tf.float32, [])
+    def _discrete_policy_loss(self):
         A_sparse = tf.one_hot(self.A, self.n_a)
-
         log_pi = tf.log(tf.clip_by_value(self.pi, 1e-10, 1.0))
         entropy = -tf.reduce_sum(self.pi * log_pi, axis=1)
         entropy_loss = -tf.reduce_mean(entropy) * self.entropy_coef
         policy_loss = -tf.reduce_mean(tf.reduce_sum(log_pi * A_sparse, axis=1) * self.ADV)
+        return policy_loss, entropy_loss
+
+    def _continuous_policy_loss(self):
+        a_norm_dist = tf.distributions.Normal(self.pi[0], self.pi[1])
+        log_prob = a_norm_dist.log_prob(self.A)
+        entropy_loss = -tf.reduce_mean(a_norm_dist.entropy()) * self.entropy_coef
+        policy_loss = -tf.reduce_mean(log_prob * self.ADV)
+        return policy_loss, entropy_loss
+
+    def prepare_loss(self, optimizer, lr, v_coef, max_grad_norm, alpha, epsilon):
+        if not self.discrete:
+            self.A = tf.placeholder(tf.float32, [self.n_step])
+        else:
+            self.A = tf.placeholder(tf.int32, [self.n_step])
+        self.ADV = tf.placeholder(tf.float32, [self.n_step])
+        self.R = tf.placeholder(tf.float32, [self.n_step])
+        self.entropy_coef = tf.placeholder(tf.float32, [])
+        if self.discrete:
+            policy_loss, entropy_loss = self._discrete_policy_loss()
+        else:
+            policy_loss, entropy_loss = self._continuous_policy_loss()
         value_loss = tf.reduce_mean(tf.square(self.R - self.v)) * 0.5 * v_coef
         self.loss = policy_loss + value_loss + entropy_loss
 
@@ -82,8 +110,9 @@ class Policy:
 
 
 class LstmPolicy(Policy):
-    def __init__(self, n_s, n_a, n_step, i_thread, n_past=-1, n_fc=[128], n_lstm=64):
-        Policy.__init__(self, n_a, n_s, n_step, n_past)
+    def __init__(self, n_s, n_a, n_step, i_thread, n_past=-1,
+                 n_fc=[128], n_lstm=64, discrete=True):
+        Policy.__init__(self, n_a, n_s, n_step, n_past, discrete)
         self.name = 'lstm_' + str(i_thread)
         self.n_lstm = n_lstm
         self.n_fc = n_fc
@@ -93,7 +122,7 @@ class LstmPolicy(Policy):
         self.done_bw = tf.placeholder(tf.float32, [n_step])
         self.states = tf.placeholder(tf.float32, [2, n_lstm * 2])
         with tf.variable_scope(self.name):
-            # pi and v use separate nets 
+            # pi and v use separate nets
             self.pi_fw, pi_state = self._build_net(n_fc, 'forward', 'pi')
             self.v_fw, v_state = self._build_net(n_fc, 'forward', 'v')
             pi_state = tf.expand_dims(pi_state, 0)
@@ -177,16 +206,19 @@ class LstmPolicy(Policy):
     def _get_forward_outs(self, out_type):
         outs = []
         if 'p' in out_type:
-            outs.append(self.pi_fw)
+            if self.discrete:
+                outs.append(self.pi)
+            else:
+                outs += self.pi
         if 'v' in out_type:
-            outs.append(self.v_fw)
+            outs.append(self.v)
         return outs
 
 
 class Cnn1DPolicy(Policy):
     def __init__(self, n_s, n_a, n_step, i_thread, n_past=10,
-                 n_fc=[128], n_filter=64, m_filter=3):
-        Policy.__init__(self, n_a, n_s, n_step, n_past)
+                 n_fc=[128], n_filter=64, m_filter=3, discrete=True):
+        Policy.__init__(self, n_a, n_s, n_step, n_past, discrete)
         self.name = 'cnn1d_' + str(i_thread)
         self.n_filter = n_filter
         self.m_filter = m_filter

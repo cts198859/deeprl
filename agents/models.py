@@ -5,7 +5,7 @@ from agents.policies import *
 
 class A2C:
     def __init__(self, sess, n_s, n_a, total_step, i_thread=-1, optimizer=None, lr=None,
-                 model_config=None):
+                 model_config=None, discrete=True):
         policy = model_config.get('POLICY')
         v_coef = model_config.getfloat('VALUE_COEF')
         max_grad_norm = model_config.getfloat('MAX_GRAD_NORM')
@@ -25,17 +25,20 @@ class A2C:
         n_fc = [int(x) for x in n_fc]
 
         if policy == 'lstm':
-            n_lstm = model_config.getint('NUM_LSTM')  
-            self.policy = LstmPolicy(n_s, n_a, n_step, i_thread, n_past, n_fc=n_fc, n_lstm=n_lstm)
+            n_lstm = model_config.getint('NUM_LSTM')
+            self.policy = LstmPolicy(n_s, n_a, n_step, i_thread, n_past, n_fc=n_fc,
+                                     n_lstm=n_lstm, discrete=discrete)
         elif policy == 'cnn1':
             n_filter = model_config.getint('NUM_FILTER')
             m_filter = model_config.getint('SIZE_FILTER')
             self.policy = Cnn1DPolicy(n_s, n_a, n_step, i_thread, n_past,
-                                      n_fc=n_fc, n_filter=n_filter, m_filter=m_filter)
+                                      n_fc=n_fc, n_filter=n_filter,
+                                      m_filter=m_filter, discrete=discrete)
         self.name = self.policy.name
         self.policy.prepare_loss(optimizer, lr, v_coef, max_grad_norm, alpha, epsilon)
 
         if (i_thread == -1) and (total_step > 0):
+            # global lr and entropy beta scheduler
             self.lr_scheduler = Scheduler(lr_init, lr_min, total_step, decay=lr_decay)
             self.beta_scheduler = Scheduler(beta_init, beta_min, total_step * beta_ratio,
                                             decay=beta_decay)
