@@ -40,7 +40,7 @@ class GlobalCounter:
 
 
 def parse_args():
-    default_config_path = '/Users/tchu/Documents/Uhana/remote/deeprl_signal_control/config.ini'
+    default_config_path = '/Users/tchu/Documents/Uhana/remote/deeprl/config.ini'
     parser = argparse.ArgumentParser()
     parser.add_argument('--config-path', type=str, required=False,
                         default=default_config_path, help="config path")
