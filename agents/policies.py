@@ -11,8 +11,6 @@ class Policy:
         self.n_step = n_step
         self.n_past = n_past
         self.discrete = discrete
-        if discrete:
-            self._init_a_bound(a_min, a_max)
 
     def forward(self, ob, *_args, **_kwargs):
         raise NotImplementedError()
