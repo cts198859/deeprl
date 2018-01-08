@@ -28,8 +28,7 @@ class Policy:
                 return tf.squeeze(pi)
             else: 
                 mu = fc(h, 'mu', self.n_a, act=tf.nn.tanh)
-                #TODO: compare x and sqrt(x)
-                std = fc(h, 'std', self.n_a, act=tf.nn.softplus)
+                std = fc(h, 'std', self.n_a, act=tf.nn.tanh) + 1
                 # need 1e-3 to avoid log_prob explosion
                 return [tf.squeeze(mu), tf.squeeze(std) + 1e-3]
         else:
