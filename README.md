@@ -6,11 +6,12 @@ The implementation of deepRL agents for both discrete and continuous (only singl
 Define all parameters in `config.ini`, and run `python3 main.py --config-path [path to config.ini]`.
 
 ## Example results
-continuous control                           | discrete control
-:-------------------------------------------:|:-----------------------------------------------:
-![Pendulum](./docs/pend.png)                 | ![Acrobot](./docs/acro.png)
-:-------------------------------------------:|:------------------------------:
-![MountainCarContinuous](./docs/contcar.png) | ![MountainCar](./docs/car.png)
+**continuous control**     | discrete control
+:-------------------------:|:--------------------------:
+Pendulum                   | Acrobot
+![](./docs/pend.png)       | ![](./docs/acro.png)
+MountainCarContinuous      | MountainCar
+![](./docs/contcar.png)    | ![](./docs/car.png)
 
 
 
