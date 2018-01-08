@@ -70,7 +70,7 @@ class Trainer:
             # logging
             if self.global_counter.should_log():
                 tf.logging.info('''thread %d, global step %d, local step %d, episode step %d,
-                                   ob: %s, a: %d, pi: %s, v: %.2f, r: %.2f, done: %r''' %
+                                   ob: %s, a: %.2f, pi: %s, v: %.2f, r: %.2f, done: %r''' %
                                 (self.i_thread, global_step, self.cur_step, len(cum_actions),
                                  str(ob), action, str(policy), value, reward, done))
             # termination

@@ -212,10 +212,13 @@ class OnPolicyBuffer(TransBuffer):
         self.Rs = Rs
         self.Advs = Advs
 
-    def sample_transition(self, R):
+    def sample_transition(self, R, discrete=True):
         self._add_R_Adv(R)
         obs = np.array(self.obs, dtype=np.float32)
-        acts = np.array(self.acts, dtype=np.int16)
+        if discrete:
+            acts = np.array(self.acts, dtype=np.int32)
+        else:
+            acts = np.array(self.acts, dtype=np.float32)
         Rs = np.array(self.Rs, dtype=np.float32)
         Advs = np.array(self.Advs, dtype=np.float32)
         # use pre-step dones here

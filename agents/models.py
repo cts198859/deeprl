@@ -19,7 +19,7 @@ class A2C:
         beta_decay = model_config.get('ENTROPY_DECAY')
         beta_ratio = model_config.getfloat('ENTROPY_RATIO')
         gamma = model_config.getfloat('GAMMA')
-        reward_clip = model_config.getfloat('REWARD_CLIP')
+        reward_norm = model_config.getfloat('REWARD_NORM')
         n_step = model_config.getint('NUM_STEP')
         n_past = model_config.getint('NUM_PAST')
         n_fc = model_config.get('NUM_FC').split(',')
@@ -73,15 +73,15 @@ class A2C:
                     print('could not find old checkpoint')
 
         def backward(R, cur_lr, cur_beta):
-            obs, acts, dones, Rs, Advs = self.trans_buffer.sample_transition(R)
+            obs, acts, dones, Rs, Advs = self.trans_buffer.sample_transition(R, discrete)
             return self.policy.backward(sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta)
 
         def forward(ob, done, out_type='pv'):
             return self.policy.forward(sess, ob, done, out_type)
 
         def add_transition(ob, action, reward, value, done):
-            if reward_clip:
-                reward = min(max(reward, -reward_clip), reward_clip)
+            if reward_norm:
+                reward /= reward_norm
             self.trans_buffer.add_transition(ob, action, reward, value, done)
 
         self.save = save

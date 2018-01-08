@@ -29,8 +29,9 @@ class Policy:
             else: 
                 mu = fc(h, 'mu', self.n_a, act=tf.nn.tanh)
                 #TODO: compare x and sqrt(x)
-                std = fc(h, 'std', self.n_a, act=tf.nn.sigmoid)
-                return [tf.squeeze(mu), tf.squeeze(std)]
+                std = fc(h, 'std', self.n_a, act=tf.nn.softplus)
+                # need 1e-3 to avoid log_prob explosion
+                return [tf.squeeze(mu), tf.squeeze(std) + 1e-3]
         else:
             v = fc(h, out_type, 1, act=lambda x: x)
             return tf.squeeze(v)
@@ -60,7 +61,7 @@ class Policy:
         return policy_loss, entropy_loss
 
     def _continuous_policy_loss(self):
-        a_norm_dist = tf.distributions.Normal(self.pi[0], self.pi[1])
+        a_norm_dist = tf.contrib.distributions.Normal(self.pi[0], self.pi[1])
         log_prob = a_norm_dist.log_prob(self.A)
         entropy_loss = -tf.reduce_mean(a_norm_dist.entropy()) * self.entropy_coef
         policy_loss = -tf.reduce_mean(log_prob * self.ADV)
@@ -89,7 +90,7 @@ class Policy:
             # global policy
             self.lr = tf.placeholder(tf.float32, [])
             self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr, decay=alpha,
-                                                       epsilon=epsilon, use_locking=True)
+                                                       epsilon=epsilon)
             self._train = self.optimizer.apply_gradients(list(zip(grads, wts)))
         else:
             # local policy
