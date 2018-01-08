@@ -54,8 +54,13 @@ class Trainer:
         ob = prev_ob
         done = prev_done
         for _ in range(self.n_step):
-            policy, value = self.model.forward(ob, done)
-            action = np.random.choice(np.arange(len(policy)), p=policy)
+            if self.env.discrete:
+                policy, value = self.model.forward(ob, done)
+                action = np.random.choice(np.arange(len(policy)), p=policy)
+            else:
+                mu, std, value = self.model.forward(ob, done)
+                action = self.env.sample_action(mu, std)
+                policy = [mu, std]
             next_ob, reward, done, _ = self.env.step(action)
             cum_actions.append(action)
             cum_reward += reward
@@ -65,7 +70,7 @@ class Trainer:
             # logging
             if self.global_counter.should_log():
                 tf.logging.info('''thread %d, global step %d, local step %d, episode step %d,
-                                   ob: %s, a: %d, pi: %s, v: %.2f, r: %.2f, done: %r''' %
+                                   ob: %s, a: %.2f, pi: %s, v: %.2f, r: %.2f, done: %r''' %
                                 (self.i_thread, global_step, self.cur_step, len(cum_actions),
                                  str(ob), action, str(policy), value, reward, done))
             # termination
