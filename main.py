@@ -1,42 +1,13 @@
 import argparse
 import configparser
-import itertools
 import numpy as np
 import os
-import signal
 import tensorflow as tf
-import threading
-
-from agents.models import A2C
+import multiprocessing as mp
+from agents.models import run_update
+from agents.utils import GlobalCounter
 from envs.wrapper import GymEnv
-from train import Trainer, AsyncTrainer
-
-
-class GlobalCounter:
-    def __init__(self, total_step, save_step, log_step):
-        self.counter = itertools.count(1)
-        self.cur_step = 0
-        self.cur_save_step = 0
-        self.total_step = total_step
-        self.save_step = save_step
-        self.log_step = log_step
-
-    def next(self):
-        self.cur_step = next(self.counter)
-        return self.cur_step
-
-    def should_save(self):
-        save = False
-        if (self.cur_step - self.cur_save_step) >= self.save_step:
-            save = True
-            self.cur_save_step = self.cur_step
-        return save
-
-    def should_log(self):
-        return (self.cur_step % self.log_step == 0)
-
-    def should_stop(self):
-        return (self.cur_step >= self.total_step)
+from train import run_explore
 
 
 def parse_args():
@@ -45,10 +16,6 @@ def parse_args():
     parser.add_argument('--config-path', type=str, required=False,
                         default=default_config_path, help="config path")
     return parser.parse_args()
-
-
-def signal_handler(signal, frame):
-    print('You pressed Ctrl+C!')
 
 
 def init_out_dir(base_dir):
@@ -63,104 +30,69 @@ def init_out_dir(base_dir):
     return save_path, log_path
 
 
-def init_model_summary():
-    entropy_loss = tf.placeholder(tf.float32, [])
-    policy_loss = tf.placeholder(tf.float32, [])
-    value_loss = tf.placeholder(tf.float32, [])
-    total_loss = tf.placeholder(tf.float32, [])
-    lr = tf.placeholder(tf.float32, [])
-    beta = tf.placeholder(tf.float32, [])
-    gradnorm = tf.placeholder(tf.float32, [])
-    summaries = []
-    summaries.append(tf.summary.scalar('loss/entropy', entropy_loss))
-    summaries.append(tf.summary.scalar('loss/policy', policy_loss))
-    summaries.append(tf.summary.scalar('loss/value', value_loss))
-    summaries.append(tf.summary.scalar('loss/total', total_loss))
-    summaries.append(tf.summary.scalar('train/lr', lr))
-    summaries.append(tf.summary.scalar('train/beta', beta))
-    summaries.append(tf.summary.scalar('train/gradnorm', gradnorm))
-    summary = tf.summary.merge(summaries)
-    return (summary, entropy_loss, policy_loss, value_loss, total_loss, lr, beta, gradnorm)
+def init_shared_data(train_config):
+    total_step = int(train_config.getfloat('MAX_STEP'))
+    n_env = int(train_config.getfloat('NUM_ENV'))
+    save_step = int(train_config.getfloat('SAVE_INTERVAL'))
+    log_step = int(train_config.getfloat('LOG_INTERVAL'))
+    global_counter = GlobalCounter(total_step, save_step, log_step)
+    mp_dict = mp.Manager().dict()
+    mp_list = []
+    mp_dict['global_counter'] = global_counter
+    mp_dict['global_wt'] = None
+    for _ in range(n_env):
+        # batch, (cum_reward, step)
+        cur_list = [mp.Queue(1), mp.Queue(1)]
+        mp_list.append(cur_list)
+    return mp_dict, mp_list
 
 
 def gym_env():
+    # input paramters
     args = parse_args()
     parser = configparser.ConfigParser()
     parser.read(args.config_path)
     seed = parser.getint('TRAIN_CONFIG', 'SEED')
-    num_env = parser.getint('TRAIN_CONFIG', 'NUM_ENV')
+    n_env = parser.getint('TRAIN_CONFIG', 'NUM_ENV')
     env_name = parser.get('ENV_CONFIG', 'NAME')
     is_discrete = parser.getboolean('ENV_CONFIG', 'DISCRETE')
+    total_step = int(parser.getfloat('TRAIN_CONFIG', 'MAX_STEP'))
+    base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
+
+    # initalize global agent and env
     env = GymEnv(env_name, is_discrete)
     env.seed(seed)
     n_a = env.n_a
     n_s = env.n_s
-    total_step = int(parser.getfloat('TRAIN_CONFIG', 'MAX_STEP'))
-    base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
-    save_step = int(parser.getfloat('TRAIN_CONFIG', 'SAVE_INTERVAL'))
-    log_step = int(parser.getfloat('TRAIN_CONFIG', 'LOG_INTERVAL'))
     save_path, log_path = init_out_dir(base_dir)
 
     tf.set_random_seed(seed)
-    config = tf.ConfigProto(allow_soft_placement=True)
-    sess = tf.Session(config=config)
-    global_model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'],
-                       discrete=is_discrete)
-    global_counter = GlobalCounter(total_step, save_step, log_step)
-    coord = tf.train.Coordinator()
-    threads = []
-    trainers = []
-    model_summary = init_model_summary()
+    mp_dict, mp_list = init_shared_data(parser['TRAIN_CONFIG'])
 
-    if num_env == 1:
-        # regular training
-        summary_writer = tf.summary.FileWriter(log_path, sess.graph)
-        trainer = Trainer(env, global_model, save_path, summary_writer, global_counter, model_summary)
-        trainers.append(trainer)
-    else:
-        # asynchronous training
-        lr_scheduler = global_model.lr_scheduler
-        beta_scheduler = global_model.beta_scheduler
-        optimizer = global_model.optimizer
-        lr = global_model.lr
-        models = []
-        wt_summary = global_model.policy.summary
-        reward_summary = None
-        # initialize model to update graph
-        for i in range(num_env):
-            models.append(A2C(sess, n_s, n_a, total_step, i_thread=i, optimizer=optimizer,
-                              lr=lr, model_config=parser['MODEL_CONFIG'], discrete=is_discrete))
-        summary_writer = tf.summary.FileWriter(log_path, sess.graph)
-        for i in range(num_env):
-            env = GymEnv(env_name, is_discrete)
-            env.seed(seed + i)
-            trainer = AsyncTrainer(env, models[i], save_path, summary_writer, global_counter,
-                                   i, lr_scheduler, beta_scheduler, model_summary, wt_summary,
-                                   reward_summary=reward_summary)
-            if i == 0:
-                reward_summary = (trainer.reward_summary, trainer.total_reward)
-            trainers.append(trainer)
+    global_agent = mp.Process(target=run_update,
+                              args=(n_s, n_a, total_step, parser['MODEL_CONFIG'], is_discrete,
+                                    n_env, save_path, log_path, mp_dict, mp_list),
+                              daemon=True)
+    global_agent.start()
+    local_agents = []
+    for i in range(n_env):
+        agent = mp.Process(target=run_explore,
+                           args=(n_s, n_a, total_step, i, parser['MODEL_CONFIG'], is_discrete,
+                                 env_name, seed, mp_dict, mp_list[i]))
+        agent.start()
+        local_agents.append(agent)
+    try:
+        global_agent.join()
+    except KeyboardInterrupt:
+        print('ctrl+C pressed ...')
+        global_agent.join()
+    except:
+        global_agent.terminate()
+        global_agent.join()
 
-    sess.run(tf.global_variables_initializer())
-    saver = tf.train.Saver(max_to_keep=20)
-    global_model.load(saver, save_path)
-
-    def train_fn(i_thread):
-        trainers[i_thread].run(sess, saver, coord)
-
-    for i in range(num_env):
-        thread = threading.Thread(target=train_fn, args=(i,))
-        thread.start()
-        threads.append(thread)
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.pause()
-    coord.request_stop()
-    coord.join(threads)
-    save_flag = input('save final model? Y/N: ')
-    if save_flag.lower().startswith('y'):
-        print('saving model at step %d ...' % global_counter.cur_step)
-        global_model.save(saver, save_path + 'checkpoint', global_counter.cur_step)
-
+    for agent in local_agents:
+        agent.terminate()
+        agent.join()
 
 if __name__ == '__main__':
     gym_env()

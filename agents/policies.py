@@ -5,12 +5,13 @@ import bisect
 
 
 class Policy:
-    def __init__(self, n_a, n_s, n_step, n_past, discrete):
+    def __init__(self, n_a, n_s, n_step, n_past, discrete, i_thread):
         self.n_a = n_a
         self.n_s = n_s
         self.n_step = n_step
         self.n_past = n_past
         self.discrete = discrete
+        self.i_thread = i_thread
 
     def forward(self, ob, *_args, **_kwargs):
         raise NotImplementedError()
@@ -64,7 +65,9 @@ class Policy:
         policy_loss = -tf.reduce_mean(log_prob * self.ADV)
         return policy_loss, entropy_loss
 
-    def prepare_loss(self, optimizer, lr, v_coef, max_grad_norm, alpha, epsilon):
+    # only for global agent
+    def prepare_loss(self, v_coef, max_grad_norm, alpha, epsilon):
+        assert(self.i_thread == -1)
         if not self.discrete:
             self.A = tf.placeholder(tf.float32, [self.n_step])
         else:
@@ -79,121 +82,125 @@ class Policy:
         value_loss = tf.reduce_mean(tf.square(self.R - self.v)) * 0.5 * v_coef
         self.loss = policy_loss + value_loss + entropy_loss
 
-        wts = tf.trainable_variables(scope=self.name)
-        grads = tf.gradients(self.loss, wts)
+        self.wts = tf.trainable_variables(scope=self.name)
+        grads = tf.gradients(self.loss, self.wts)
         if max_grad_norm > 0:
             grads, self.grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
-        if optimizer is None:
-            # global policy
-            self.lr = tf.placeholder(tf.float32, [])
-            self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr, decay=alpha,
-                                                       epsilon=epsilon)
-            self._train = self.optimizer.apply_gradients(list(zip(grads, wts)))
-        else:
-            # local policy
-            self.lr = lr
-            self.optimizer = None
-            global_name = self.name.split('_')[0] + '_' + str(-1)
-            global_wts = tf.trainable_variables(scope=global_name)
-            self._train = optimizer.apply_gradients(list(zip(grads, global_wts)))
-            self.sync_wt = self._sync_wt(global_wts, wts)
-        self.train_out = [entropy_loss, policy_loss, value_loss, self.loss, self.grad_norm]
+        self.lr = tf.placeholder(tf.float32, [])
+        self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr, decay=alpha,
+                                                   epsilon=epsilon)
+        self._train = self.optimizer.apply_gradients(list(zip(grads, self.wts)))
+        self.summaries.append(tf.summary.scalar('loss/entropy', entropy_loss))
+        self.summaries.append(tf.summary.scalar('loss/policy', policy_loss))
+        self.summaries.append(tf.summary.scalar('loss/value', value_loss))
+        self.summaries.append(tf.summary.scalar('loss/total', self.loss))
+        self.summaries.append(tf.summary.scalar('train/lr', self.lr))
+        self.summaries.append(tf.summary.scalar('train/beta', self.entropy_coef))
+        self.summaries.append(tf.summary.scalar('train/gradnorm', self.grad_norm))
+        self._summary = tf.summary.merge(self.summaries)
 
-    @staticmethod
-    def _sync_wt(global_wt, local_wt):
+    # only for local agent
+    def prepare_sync(self):
+        assert(self.i_thread >= 0)
+        self.global_wts = []
+        local_wts = tf.trainable_variables(scope=self.name)
+        for w in local_wts:
+            self.global_wts.append(tf.placeholder(tf.float32, w.shape))
         sync_ops = []
-        for w1, w2 in zip(global_wt, local_wt):
+        for w1, w2 in zip(self.global_wts, local_wts):
             sync_ops.append(w2.assign(w1))
-        return tf.group(*sync_ops)
+        self._sync_wt = tf.group(*sync_ops)
+
+    def sync_wt(self, sess, wts):
+        assert(self.i_thread >= 0)
+        sess.run(self._sync_wt, {key:val for key, val in zip(self.global_wts, wts)})
 
 
 class LstmPolicy(Policy):
     def __init__(self, n_s, n_a, n_step, i_thread, n_past=-1,
                  n_fc=[128], n_lstm=64, discrete=True):
-        Policy.__init__(self, n_a, n_s, n_step, n_past, discrete)
+        Policy.__init__(self, n_a, n_s, n_step, n_past, discrete, i_thread)
         self.name = 'lstm_' + str(i_thread)
         self.n_lstm = n_lstm
         self.n_fc = n_fc
-        self.ob_fw = tf.placeholder(tf.float32, [1, n_s]) # forward 1-step
-        self.done_fw = tf.placeholder(tf.float32, [1])
-        self.ob_bw = tf.placeholder(tf.float32, [n_step, n_s]) # backward n-step
-        self.done_bw = tf.placeholder(tf.float32, [n_step])
+        if i_thread >= 0:
+            self.ob = tf.placeholder(tf.float32, [1, n_s]) # forward 1-step
+            self.done = tf.placeholder(tf.float32, [1])
+        else:
+            self.ob = tf.placeholder(tf.float32, [n_step, n_s]) # backward n-step
+            self.done = tf.placeholder(tf.float32, [n_step])
         self.states = tf.placeholder(tf.float32, [2, n_lstm * 2])
         with tf.variable_scope(self.name):
             # pi and v use separate nets
-            self.pi_fw, pi_state = self._build_net(n_fc, 'forward', 'pi')
-            self.v_fw, v_state = self._build_net(n_fc, 'forward', 'v')
+            self.pi, pi_state = self._build_net(n_fc, 'pi')
+            self.v, v_state = self._build_net(n_fc, 'v')
             pi_state = tf.expand_dims(pi_state, 0)
             v_state = tf.expand_dims(v_state, 0)
             self.new_states = tf.concat([pi_state, v_state], 0)
-        with tf.variable_scope(self.name, reuse=True):
-            self.pi, _ = self._build_net(n_fc, 'backward', 'pi')
-            self.v, _ = self._build_net(n_fc, 'backward', 'v')
-            if i_thread == -1:
-                summaries = []
+        if i_thread == -1:
+            with tf.variable_scope(self.name, reuse=True):
                 lstm_pi_w = tf.get_variable('pi_lstm/wx')
                 lstm_v_w = tf.get_variable('v_lstm/wx')
                 fc_pi_w = tf.get_variable('pi_fc0/w')
                 fc_v_w = tf.get_variable('v_fc0/w')
-                summaries.append(tf.summary.histogram('wt/lstm_pi', tf.reshape(lstm_pi_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/lstm_v', tf.reshape(lstm_v_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/fc_pi', tf.reshape(fc_pi_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/fc_v', tf.reshape(fc_v_w, [-1])))
-                self.summary = tf.summary.merge(summaries)
-        self._reset()
+            self.summaries = []
+            self.summaries.append(tf.summary.histogram('wt/lstm_pi', tf.reshape(lstm_pi_w, [-1])))
+            self.summaries.append(tf.summary.histogram('wt/lstm_v', tf.reshape(lstm_v_w, [-1])))
+            self.summaries.append(tf.summary.histogram('wt/fc_pi', tf.reshape(fc_pi_w, [-1])))
+            self.summaries.append(tf.summary.histogram('wt/fc_v', tf.reshape(fc_v_w, [-1])))
 
     def _build_net(self, n_fc, in_type, out_type):
-        if in_type == 'forward':
-            ob = self.ob_fw
-            done = self.done_fw
-        else:
-            ob = self.ob_bw
-            done = self.done_bw
         if out_type == 'pi':
             states = self.states[0]
         else:
             states = self.states[1]
-        h, new_states = lstm(ob, done, states, out_type + '_lstm')
+        h, new_states = lstm(self.ob, self.done, states, out_type + '_lstm')
         out_val = self._build_fc_net(h, n_fc, out_type)
         return out_val, new_states
 
-    def _reset(self):
+    def reset(self, n_envs=1):
         # forget the cumulative states every cum_step
-        self.states_fw = np.zeros((2, self.n_lstm * 2), dtype=np.float32)
-        self.states_bw = np.zeros((2, self.n_lstm * 2), dtype=np.float32)
-        self.cur_step = 0
+        if self.i_thread >= 0:
+            self.prev_states = np.zeros((2, self.n_lstm * 2), dtype=np.float32)
+            self.cur_step = 0
+        else:
+            self.prev_states = []
+            for _ in range(n_envs):
+                self.prev_states.append(np.zeros((2, self.n_lstm * 2), dtype=np.float32))
 
     def forward(self, sess, ob, done, out_type='pv'):
+        assert(self.i_thread >= 0)
         outs = self._get_forward_outs(out_type)
         # update state only when p is called
         if 'p' in out_type:
             outs.append(self.new_states)
-        out_values = sess.run(outs, {self.ob_fw:np.array([ob]),
-                                     self.done_fw:np.array([done]),
-                                     self.states:self.states_fw})
+        out_values = sess.run(outs, {self.ob:np.array([ob]),
+                                     self.done:np.array([done]),
+                                     self.states:self.prev_states})
         if 'p' in out_type:
-            self.states_fw = out_values[-1]
+            self.prev_states = out_values[-1]
             out_values = out_values[:-1]
         if done:
             self.cur_step = 0
         self.cur_step += 1
         if (self.n_past > 0) and (self.cur_step >= self.n_past):
-            self.states_fw = np.zeros((2, self.n_lstm * 2), dtype=np.float32)
-            self.cur_step = 0
+            self.reset()
         return self._return_forward_outs(out_values)
 
-    def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta):
-        summary_out = sess.run(self.train_out + [self._train],
-                                  {self.ob_bw:obs,
-                                   self.done_bw:dones,
-                                   self.states:self.states_bw,
-                                   self.A:acts,
-                                   self.ADV:Advs,
-                                   self.R:Rs,
-                                   self.lr:cur_lr,
-                                   self.entropy_coef:cur_beta})
-        self.states_bw = np.copy(self.states_fw)
-        return summary_out[:-1]
+    def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta, i=0):
+        assert(self.i_thread == -1)
+        prev_states = self.prev_states[i]
+        new_states, summary, _ = sess.run([self.new_states, self._summary, self._train],
+                                          {self.ob_bw:obs,
+                                           self.done_bw:dones,
+                                           self.states:prev_states,
+                                           self.A:acts,
+                                           self.ADV:Advs,
+                                           self.R:Rs,
+                                           self.lr:cur_lr,
+                                           self.entropy_coef:cur_beta})
+        self.prev_states[i] = new_states
+        return summary
 
     def _backward_policy(self, sess, obs, dones):
         pi = sess.run(self.pi, {self.ob_bw:obs, self.done_bw:dones,
@@ -201,22 +208,11 @@ class LstmPolicy(Policy):
         self.states_bw = np.copy(self.states_fw)
         return pi
 
-    def _get_forward_outs(self, out_type):
-        outs = []
-        if 'p' in out_type:
-            if self.discrete:
-                outs.append(self.pi_fw)
-            else:
-                outs += self.pi_fw
-        if 'v' in out_type:
-            outs.append(self.v_fw)
-        return outs
-
 
 class Cnn1DPolicy(Policy):
     def __init__(self, n_s, n_a, n_step, i_thread, n_past=10,
                  n_fc=[128], n_filter=64, m_filter=3, discrete=True):
-        Policy.__init__(self, n_a, n_s, n_step, n_past, discrete)
+        Policy.__init__(self, n_a, n_s, n_step, n_past, discrete, i_thread)
         self.name = 'cnn1d_' + str(i_thread)
         self.n_filter = n_filter
         self.m_filter = m_filter
@@ -227,17 +223,15 @@ class Cnn1DPolicy(Policy):
             self.v = self._build_net(n_fc, 'v')
         if i_thread == -1:
             with tf.variable_scope(self.name, reuse=True):
-                summaries = []
                 conv1_pi_w = tf.get_variable('pi_conv1/w')
                 conv1_v_w = tf.get_variable('v_conv1/w')
                 fc_pi_w = tf.get_variable('pi_fc0/w')
                 fc_v_w = tf.get_variable('v_fc0/w')
-                summaries.append(tf.summary.histogram('wt/conv1_pi', tf.reshape(conv1_pi_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/conv1_v', tf.reshape(conv1_v_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/fc_pi', tf.reshape(fc_pi_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/fc_v', tf.reshape(fc_v_w, [-1])))
-                self.summary = tf.summary.merge(summaries)
-        self._reset()
+            self.summaries = []
+            self.summaries.append(tf.summary.histogram('wt/conv1_pi', tf.reshape(conv1_pi_w, [-1])))
+            self.summaries.append(tf.summary.histogram('wt/conv1_v', tf.reshape(conv1_v_w, [-1])))
+            self.summaries.append(tf.summary.histogram('wt/fc_pi', tf.reshape(fc_pi_w, [-1])))
+            self.summaries.append(tf.summary.histogram('wt/fc_v', tf.reshape(fc_v_w, [-1])))
 
     def _build_net(self, n_fc, out_type):
         h = conv(self.obs, out_type + '_conv1', self.n_filter, self.m_filter, conv_dim=1)
@@ -245,21 +239,26 @@ class Cnn1DPolicy(Policy):
         h = tf.reshape(h, [-1, n_conv_fc])
         return self._build_fc_net(h, n_fc, out_type)
 
-    def _reset(self):
-        self.recent_obs_fw = np.zeros((self.n_past-1, self.n_s))
-        self.recent_obs_bw = np.zeros((self.n_past-1, self.n_s))
-        self.recent_dones_fw = np.zeros(self.n_past-1)
-        self.recent_dones_bw = np.zeros(self.n_past-1)
+    def reset(self, n_env=1):
+        if self.i_thread >= 0:
+            self.recent_obs = np.zeros((self.n_past-1, self.n_s))
+            self.recent_dones = np.zeros(self.n_past-1)
+        else:
+            self.recent_obs = []
+            self.recent_dones = []
+            for _ in range(n_env):
+                self.recent_obs.append(np.zeros((self.n_past-1, self.n_s)))
+                self.recent_dones.append(np.zeros(self.n_past-1))
 
-    def _recent_ob(self, obs, dones, ob_type='forward'):
+    def _recent_ob(self, obs, dones, i_agent=-1):
         # convert [n_step, n_s] to [n_step, n_past, n_s]
         num_obs = len(obs)
-        if ob_type == 'forward':
-            recent_obs = np.copy(self.recent_obs_fw)
-            recent_dones = np.copy(self.recent_dones_fw)
+        if self.i_thread >= 0:
+            recent_obs = np.copy(self.recent_obs)
+            recent_dones = np.copy(self.recent_dones)
         else:
-            recent_obs = np.copy(self.recent_obs_bw)
-            recent_dones = np.copy(self.recent_dones_bw)
+            recent_obs = np.copy(self.recent_obs[i_agent])
+            recent_dones = np.copy(self.recent_dones[i_agent])
         comb_obs = np.vstack([recent_obs, obs])
         comb_dones = np.concatenate([recent_dones, dones])
         new_obs = []
@@ -274,30 +273,32 @@ class Cnn1DPolicy(Policy):
             new_obs.append(cur_obs)
         recent_obs = comb_obs[(1-self.n_past):]
         recent_dones = comb_dones[(1-self.n_past):]
-        if ob_type == 'forward':
-            self.recent_obs_fw = recent_obs
-            self.recent_dones_fw = recent_dones
+        if self.i_thread >= 0:
+            self.recent_obs = recent_obs
+            self.recent_dones = recent_dones
         else:
-            self.recent_obs_bw = recent_obs
-            self.recent_dones_bw = recent_dones
+            self.recent_obs[i_agent] = recent_obs
+            self.recent_dones[i_agent] = recent_dones
         return np.array(new_obs)
 
     def forward(self, sess, ob, done, out_type='pv'):
+        assert(self.i_thread >= 0)
         ob = self._recent_ob(np.array([ob]), np.array([done]))
         outs = self._get_forward_outs(out_type)
         out_values = sess.run(outs, {self.obs:ob})
         return self._return_forward_outs(out_values)
 
-    def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta):
-        obs = self._recent_ob(np.array(obs), np.array(dones),  ob_type='backward')
-        summary_out = sess.run(self.train_out + [self._train],
-                                  {self.obs:obs,
-                                   self.A:acts,
-                                   self.ADV:Advs,
-                                   self.R:Rs,
-                                   self.lr:cur_lr,
-                                   self.entropy_coef:cur_beta})
-        return summary_out[:-1]
+    def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta, i=0):
+        assert(self.i_thread == -1)
+        obs = self._recent_ob(np.array(obs), np.array(dones), i_agent=i)
+        summary, _ = sess.run([self._summary, self._train],
+                              {self.obs:obs,
+                               self.A:acts,
+                               self.ADV:Advs,
+                               self.R:Rs,
+                               self.lr:cur_lr,
+                               self.entropy_coef:cur_beta})
+        return summary
 
     def _backward_policy(self, sess, obs, dones):
         obs = self._recent_ob(np.array(obs), np.array(dones),  ob_type='backward')

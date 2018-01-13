@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+import itertools
 
 """
 initializers
@@ -231,19 +232,48 @@ class OnPolicyBuffer(TransBuffer):
 util functions
 """
 class Scheduler:
-    def __init__(self, val_init, val_min, total_step, decay='linear'):
+    def __init__(self, val_init, val_min, total_step, n_step, decay='linear'):
         self.val = val_init
         self.N = float(total_step)
         self.val_min = val_min
         self.decay = decay
-        self.n = 0
+        self.counter = itertools.count(0, n_step)
+        self.n = next(self.counter)
 
-    def get(self, n_step):
-        self.n += n_step
+    def get(self):
         if self.decay == 'linear':
-            return max(self.val_min, self.val * (1 - self.n / self.N))
+            val = max(self.val_min, self.val * (1 - self.n / self.N))
         else:
-            return self.val
+            val = self.val
+        self.n = next(self.counter)
+        return val
+
+class GlobalCounter:
+    def __init__(self, total_step, save_step, log_step):
+        self.counter = itertools.count(1)
+        self.cur_step = 0
+        self.cur_save_step = 0
+        self.total_step = total_step
+        self.save_step = save_step
+        self.log_step = log_step
+
+    def next(self):
+        self.cur_step = next(self.counter)
+        return self.cur_step
+
+    def should_save(self):
+        save = False
+        if (self.cur_step - self.cur_save_step) >= self.save_step:
+            save = True
+            self.cur_save_step = self.cur_step
+        return save
+
+    def should_log(self):
+        return (self.cur_step % self.log_step == 0)
+
+    def should_stop(self):
+        return (self.cur_step >= self.total_step)
+
 
 
 if __name__ == '__main__':
