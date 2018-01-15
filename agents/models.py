@@ -136,6 +136,9 @@ def run_update(n_s, n_a, total_step, model_config, is_discrete,
     summary_writer = tf.summary.FileWriter(log_path, model.sess.graph)
     total_reward = tf.placeholder(tf.float32, [])
     reward_summary = tf.summary.scalar('total_reward', total_reward)
+    global_wt = model.get_wt()
+    for i in range(n_env):
+        mp_list[i][1].put(global_wt)
     try:
         while True:
             global_counter = mp_dict['global_counter']
