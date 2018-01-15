@@ -40,10 +40,9 @@ def init_shared_data(train_config):
     mp_dict = mp.Manager().dict()
     mp_list = []
     mp_dict['global_counter'] = global_counter
-    mp_dict['global_wt'] = None
     for _ in range(n_env):
-        # batch, (cum_reward, step)
-        cur_list = [mp.Queue(1), mp.Queue(1)]
+        # batch, wt, (cum_reward, step)
+        cur_list = [mp.Queue(1), mp.Queue(1), mp.Queue(1)]
         mp_list.append(cur_list)
     return mp_dict, mp_list
 

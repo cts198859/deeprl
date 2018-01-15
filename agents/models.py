@@ -119,6 +119,13 @@ class A2C:
         self.sample_transition = sample_transition
 
 
+def get_new_step(prev_steps, step):
+    while step in prev_steps:
+        step += 1
+    prev_steps.add(step)
+    return step
+
+
 def run_update(n_s, n_a, total_step, model_config, is_discrete,
                n_env, save_path, log_path, mp_dict, mp_list):
     model = A2C(n_s, n_a, total_step, model_config=model_config,
@@ -131,6 +138,8 @@ def run_update(n_s, n_a, total_step, model_config, is_discrete,
     reward_summary = tf.summary.scalar('total_reward', total_reward)
     try:
         while True:
+            global_counter = mp_dict['global_counter']
+            reward_steps = set()
             for i in range(n_env):
                 batch = mp_list[i][0].get()
                 obs = batch['obs']
@@ -141,21 +150,26 @@ def run_update(n_s, n_a, total_step, model_config, is_discrete,
                 cur_lr = model.lr_scheduler.get()
                 cur_beta = model.beta_scheduler.get()
                 summary = model.backward(obs, A, dones, R, ADV, cur_lr, cur_beta, i)
-                # this global step is not fromm global counter
-                global_step = model.lr_scheduler.n + 1
+                for _ in range(len(A)):
+                    global_counter.next()
+                global_step = global_counter.cur_step
                 summary_writer.add_summary(summary, global_step=global_step)
-                reward, step = mp_list[i][1].get()
+                reward, step = mp_list[i][2].get()
                 if step > 0:
+                    step = get_new_step(reward_steps, step)
                     summ = model.sess.run(reward_summary, {total_reward:reward})
                     summary_writer.add_summary(summ, global_step=step)
-                summary_writer.flush()
-                mp_dict['global_wt'] = model.get_wt()
-                if mp_dict['global_counter'].should_save():
-                    print('saving model at step %d ...' % global_step)
-                    model.save(save_path + 'checkpoint', global_step)
-            if mp_dict['global_counter'].should_stop():
+            mp_dict['global_counter'] = global_counter
+            global_wt = model.get_wt()
+            for i in range(n_env):
+                mp_list[i][1].put(global_wt)
+            summary_writer.flush()
+            if global_counter.should_save():
+                print('saving model at step %d ...' % global_step)
+                model.save(save_path + 'checkpoint', global_step)
+            if global_counter.should_stop():
                 print('max step reached ...')
-                print('saving final model ...')
+                print('saving final model ...' % total_step)
                 model.save(save_path + 'checkpoint', total_step)
                 break
     except KeyboardInterrupt:

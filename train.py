@@ -5,7 +5,7 @@ from agents.models import A2C
 
 
 def explore(env, model, prev_ob, prev_done, cum_reward, cum_actions,
-            mp_dict):
+            global_counter):
     ob = prev_ob
     done = prev_done
     return_reward, return_step = -1, -1
@@ -20,10 +20,10 @@ def explore(env, model, prev_ob, prev_done, cum_reward, cum_actions,
         next_ob, reward, done, _ = env.step(action)
         cum_actions.append(action)
         cum_reward += reward
-        global_step = mp_dict['global_counter'].next()
+        global_step = global_counter.next()
         model.add_transition(ob, action, reward, value, done)
         # logging
-        if mp_dict['global_counter'].should_log():
+        if global_counter.should_log():
             tf.logging.info('''thread %d, global step %d, episode step %d,
                                ob: %s, a: %.2f, pi: %s, v: %.2f, r: %.2f, done: %r''' %
                             (model.i_thread, global_step, len(cum_actions),
@@ -57,14 +57,13 @@ def run_explore(n_s, n_a, total_step, i, model_config, is_discrete,
     tf.logging.set_verbosity(tf.logging.INFO)
     try:
         while True:
-            global_wts = mp_dict['global_wt']
-            if global_wts is None:
-                continue
+            global_wts = mp_ques[1].get()
             model.sync_wt(global_wts)
+            global_counter = mp_dict['global_counter']
             ob, done, R, cum_reward, cum_actions, return_reward, return_step = \
-                explore(env, model, ob, done, cum_reward, cum_actions, mp_dict)
+                explore(env, model, ob, done, cum_reward, cum_actions, global_counter)
             batch = model.sample_transition(R)
             mp_ques[0].put(batch)
-            mp_ques[1].put((return_reward, return_step))
+            mp_ques[2].put((return_reward, return_step))
     except KeyboardInterrupt:
         pass
