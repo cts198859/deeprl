@@ -169,7 +169,7 @@ def run_update(n_s, n_a, total_step, model_config, is_discrete,
                 model.save(save_path + 'checkpoint', global_step)
             if global_counter.should_stop():
                 print('max step reached ...')
-                print('saving final model ...' % total_step)
+                print('saving final model ...')
                 model.save(save_path + 'checkpoint', total_step)
                 break
             mp_dict['global_counter'] = global_counter
