@@ -131,7 +131,6 @@ def run_update(n_s, n_a, total_step, model_config, is_discrete,
     reward_summary = tf.summary.scalar('total_reward', total_reward)
     try:
         while True:
-            global_counter = mp_dict['global_counter']
             for i in range(n_env):
                 batch = mp_list[i][0].get()
                 obs = batch['obs']
@@ -142,9 +141,8 @@ def run_update(n_s, n_a, total_step, model_config, is_discrete,
                 cur_lr = model.lr_scheduler.get()
                 cur_beta = model.beta_scheduler.get()
                 summary = model.backward(obs, A, dones, R, ADV, cur_lr, cur_beta, i)
-                for _ in range(len(A)):
-                    global_counter.next()
-                global_step = global_counter.cur_step
+                # this global step is not fromm global counter
+                global_step = model.lr_scheduler.n + 1
                 summary_writer.add_summary(summary, global_step=global_step)
                 reward, step = mp_list[i][1].get()
                 if step > 0:
@@ -152,16 +150,14 @@ def run_update(n_s, n_a, total_step, model_config, is_discrete,
                     summary_writer.add_summary(summ, global_step=step)
                 summary_writer.flush()
                 mp_dict['global_wt'] = model.get_wt()
-                if global_counter.should_save():
+                if mp_dict['global_counter'].should_save():
                     print('saving model at step %d ...' % global_step)
                     model.save(save_path + 'checkpoint', global_step)
-            if global_counter.should_stop():
+            if mp_dict['global_counter'].should_stop():
                 print('max step reached ...')
-                global_step = mp_dict['global_counter'].cur_step
-                print('saving final model at step %d ...' % global_step)
-                model.save(save_path + 'checkpoint', global_step)
+                print('saving final model ...')
+                model.save(save_path + 'checkpoint', total_step)
                 break
-            mp_dict['global_counter'] = global_counter
     except KeyboardInterrupt:
         print('saving final model ...')
         model.save(save_path + 'checkpoint', total_step)

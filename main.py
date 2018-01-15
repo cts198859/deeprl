@@ -8,6 +8,7 @@ from agents.models import run_update
 from agents.utils import GlobalCounter
 from envs.wrapper import GymEnv
 from train import run_explore
+import time
 
 
 def parse_args():
@@ -86,6 +87,8 @@ def gym_env():
     except KeyboardInterrupt:
         print('ctrl+C pressed ...')
         global_agent.join()
+        # TODO: why join is executed correctly sometimes?
+        time.sleep(2)
     except:
         global_agent.terminate()
         global_agent.join()
