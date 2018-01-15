@@ -249,9 +249,9 @@ class Scheduler:
         return val
 
 class GlobalCounter:
-    def __init__(self, total_step, save_step, log_step):
-        self.counter = itertools.count(1)
-        self.cur_step = 0
+    def __init__(self, total_step, n_step, save_step, log_step):
+        self.counter = itertools.count(0, n_step)
+        self.cur_step = next(self.counter)
         self.cur_save_step = 0
         self.total_step = total_step
         self.save_step = save_step

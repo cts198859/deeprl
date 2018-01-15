@@ -5,7 +5,7 @@ from agents.models import A2C
 
 
 def explore(env, model, prev_ob, prev_done, cum_reward, cum_actions,
-            global_counter):
+            global_step, log_step):
     ob = prev_ob
     done = prev_done
     return_reward, return_step = -1, -1
@@ -20,10 +20,10 @@ def explore(env, model, prev_ob, prev_done, cum_reward, cum_actions,
         next_ob, reward, done, _ = env.step(action)
         cum_actions.append(action)
         cum_reward += reward
-        global_step = global_counter.next()
+        global_step += 1
         model.add_transition(ob, action, reward, value, done)
         # logging
-        if global_counter.should_log():
+        if (global_step % log_step == 0):
             tf.logging.info('''thread %d, global step %d, episode step %d,
                                ob: %s, a: %.2f, pi: %s, v: %.2f, r: %.2f, done: %r''' %
                             (model.i_thread, global_step, len(cum_actions),
@@ -60,8 +60,9 @@ def run_explore(n_s, n_a, total_step, i, model_config, is_discrete,
             global_wts = mp_ques[1].get()
             model.sync_wt(global_wts)
             global_counter = mp_dict['global_counter']
+            global_step, log_step = global_counter.cur_step, global_counter.log_step
             ob, done, R, cum_reward, cum_actions, return_reward, return_step = \
-                explore(env, model, ob, done, cum_reward, cum_actions, global_counter)
+                explore(env, model, ob, done, cum_reward, cum_actions, global_step, log_step)
             batch = model.sample_transition(R)
             mp_ques[0].put(batch)
             mp_ques[2].put((return_reward, return_step))

@@ -31,12 +31,12 @@ def init_out_dir(base_dir):
     return save_path, log_path
 
 
-def init_shared_data(train_config):
+def init_shared_data(n_step, train_config):
     total_step = int(train_config.getfloat('MAX_STEP'))
     n_env = int(train_config.getfloat('NUM_ENV'))
     save_step = int(train_config.getfloat('SAVE_INTERVAL'))
     log_step = int(train_config.getfloat('LOG_INTERVAL'))
-    global_counter = GlobalCounter(total_step, save_step, log_step)
+    global_counter = GlobalCounter(total_step, n_step, save_step, log_step)
     mp_dict = mp.Manager().dict()
     mp_list = []
     mp_dict['global_counter'] = global_counter
@@ -64,16 +64,17 @@ def gym_env():
     env.seed(seed)
     n_a = env.n_a
     n_s = env.n_s
+    n_step = parser.getint('MODEL_CONFIG', 'NUM_STEP')
     save_path, log_path = init_out_dir(base_dir)
-
+    mp_dict, mp_list = init_shared_data(n_step, parser['TRAIN_CONFIG'])
     tf.set_random_seed(seed)
-    mp_dict, mp_list = init_shared_data(parser['TRAIN_CONFIG'])
 
     global_agent = mp.Process(target=run_update,
                               args=(n_s, n_a, total_step, parser['MODEL_CONFIG'], is_discrete,
                                     n_env, save_path, log_path, mp_dict, mp_list),
                               daemon=True)
     global_agent.start()
+
     local_agents = []
     for i in range(n_env):
         agent = mp.Process(target=run_explore,
