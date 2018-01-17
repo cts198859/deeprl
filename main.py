@@ -1,42 +1,14 @@
 import argparse
 import configparser
-import itertools
 import numpy as np
-import os
 import signal
 import tensorflow as tf
 import threading
 
 from agents.models import A2C
 from envs.wrapper import GymEnv
-from train import Trainer, AsyncTrainer
-
-
-class GlobalCounter:
-    def __init__(self, total_step, save_step, log_step):
-        self.counter = itertools.count(1)
-        self.cur_step = 0
-        self.cur_save_step = 0
-        self.total_step = total_step
-        self.save_step = save_step
-        self.log_step = log_step
-
-    def next(self):
-        self.cur_step = next(self.counter)
-        return self.cur_step
-
-    def should_save(self):
-        save = False
-        if (self.cur_step - self.cur_save_step) >= self.save_step:
-            save = True
-            self.cur_save_step = self.cur_step
-        return save
-
-    def should_log(self):
-        return (self.cur_step % self.log_step == 0)
-
-    def should_stop(self):
-        return (self.cur_step >= self.total_step)
+from train import Trainer, AsyncTrainer, Evaluator
+from utils import *
 
 
 def parse_args():
@@ -44,49 +16,12 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config-path', type=str, required=False,
                         default=default_config_path, help="config path")
+    parser.add_argument('--mode', type=str, required=False,
+                        default='train', help="train or evaluate")
     return parser.parse_args()
 
 
-def signal_handler(signal, frame):
-    print('You pressed Ctrl+C!')
-
-
-def init_out_dir(base_dir):
-    if not os.path.exists(base_dir):
-        os.mkdir(base_dir)
-    save_path = base_dir + '/model/'
-    log_path = base_dir + '/log/'
-    if not os.path.exists(save_path):
-        os.mkdir(save_path)
-    if not os.path.exists(log_path):
-        os.mkdir(log_path)
-    return save_path, log_path
-
-
-def init_model_summary():
-    entropy_loss = tf.placeholder(tf.float32, [])
-    policy_loss = tf.placeholder(tf.float32, [])
-    value_loss = tf.placeholder(tf.float32, [])
-    total_loss = tf.placeholder(tf.float32, [])
-    lr = tf.placeholder(tf.float32, [])
-    beta = tf.placeholder(tf.float32, [])
-    gradnorm = tf.placeholder(tf.float32, [])
-    summaries = []
-    summaries.append(tf.summary.scalar('loss/entropy', entropy_loss))
-    summaries.append(tf.summary.scalar('loss/policy', policy_loss))
-    summaries.append(tf.summary.scalar('loss/value', value_loss))
-    summaries.append(tf.summary.scalar('loss/total', total_loss))
-    summaries.append(tf.summary.scalar('train/lr', lr))
-    summaries.append(tf.summary.scalar('train/beta', beta))
-    summaries.append(tf.summary.scalar('train/gradnorm', gradnorm))
-    summary = tf.summary.merge(summaries)
-    return (summary, entropy_loss, policy_loss, value_loss, total_loss, lr, beta, gradnorm)
-
-
-def gym_env():
-    args = parse_args()
-    parser = configparser.ConfigParser()
-    parser.read(args.config_path)
+def gym_train(parser):
     seed = parser.getint('TRAIN_CONFIG', 'SEED')
     num_env = parser.getint('TRAIN_CONFIG', 'NUM_ENV')
     env_name = parser.get('ENV_CONFIG', 'NAME')
@@ -99,7 +34,7 @@ def gym_env():
     base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
     save_step = int(parser.getfloat('TRAIN_CONFIG', 'SAVE_INTERVAL'))
     log_step = int(parser.getfloat('TRAIN_CONFIG', 'LOG_INTERVAL'))
-    save_path, log_path = init_out_dir(base_dir)
+    save_path, log_path = init_out_dir(base_dir, 'train')
 
     tf.set_random_seed(seed)
     config = tf.ConfigProto(allow_soft_placement=True)
@@ -162,5 +97,31 @@ def gym_env():
         global_model.save(saver, save_path + 'checkpoint', global_counter.cur_step)
 
 
+def gym_evaluate(parser, n_episode):
+    seed = parser.getint('TRAIN_CONFIG', 'SEED')
+    env_name = parser.get('ENV_CONFIG', 'NAME')
+    is_discrete = parser.getboolean('ENV_CONFIG', 'DISCRETE')
+    env = GymEnv(env_name, is_discrete)
+    env.seed(seed)
+    n_a = env.n_a
+    n_s = env.n_s
+    sess = tf.Session()
+    model = A2C(sess, n_s, n_a, -1, model_config=parser['MODEL_CONFIG'],
+                discrete=is_discrete)
+    base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
+    save_path, log_path = init_out_dir(base_dir, 'evaluate')
+    sess.run(tf.global_variables_initializer())
+    saver = tf.train.Saver()
+    model.load(saver, save_path)
+    evaluator = Evaluator(env, model, log_path, n_episode)
+    evaluator.run()
+
 if __name__ == '__main__':
-    gym_env()
+    args = parse_args()
+    parser = configparser.ConfigParser()
+    parser.read(args.config_path)
+    if args.mode == 'train':
+        gym_train(parser)
+    elif args.mode == 'evaluate':
+        n_episode = int(input('evaluation episodes: '))
+        gym_evaluate(parser, n_episode)
