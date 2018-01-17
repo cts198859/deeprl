@@ -207,18 +207,22 @@ class Evaluator:
         rewards = np.array(rewards)
         states = np.array(states)
         plot_episode(actions, states, rewards, run, self.log_path)
-        return actions, rewards
+        return states, actions, rewards
 
     def run(self):
         df_ls = []
         total_rewards = []
         for i in range(self.n):
-            actions, rewards = self.perform(i)
+            states, actions, rewards = self.perform(i)
             total_rewards.append(np.sum(rewards))
-            df = pd.DataFrame({'action':actions, 'reward':rewards,
-                               'run':np.ones(len(actions)) * i})
+            cur_dict = {'action':actions, 'reward':rewards,
+                        'run':np.ones(len(actions)) * i}
+            for j in range(states.shape[1]):
+                cur_dict['state_%d' % j] = states[:,j]
+            df = pd.DataFrame(cur_dict)
             df_ls.append(df)
         total_rewards = np.array(total_rewards)
         print('total reward mean: %.2f, std: %.2f' % 
               (np.mean(total_rewards), np.std(total_rewards)))
-
+        df = pd.concat(df_ls)
+        df.to_csv(self.log_path + '/data.csv')
