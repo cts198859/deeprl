@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
-
+import pandas as pd
+from utils import plot_episode
 
 class Trainer:
     def __init__(self, env, model, save_path, summary_writer, global_counter, 
@@ -174,3 +175,50 @@ class AsyncTrainer(Trainer):
                 coord.request_stop()
                 print('max step reached, press Ctrl+C to end program ...')
                 return
+
+class Evaluator:
+    def __init__(self, env, model, log_path, n_episode):
+        self.env = env
+        self.model = model
+        self.log_path = log_path
+        self.n = n_episode
+
+    def perform(self, run):
+        ob = self.env.reset()
+        done = False
+        actions = []
+        rewards = []
+        states = []
+        while True:
+            states.append(ob)
+            if self.env.discrete:
+                policy = self.model.forward(ob, done, 'p')
+                action = np.argmax(policy)
+            else:
+                mu, std = self.model.forward(ob, done, 'p')
+                action = np.clip(mu, -1, 1)
+            next_ob, reward, done, raw_action = self.env.step(action)
+            actions.append(raw_action)
+            rewards.append(reward)
+            if done:
+                break
+            ob = next_ob
+        actions = np.array(actions)
+        rewards = np.array(rewards)
+        states = np.array(states)
+        plot_episode(actions, states, rewards, run, self.log_path)
+        return actions, rewards
+
+    def run(self):
+        df_ls = []
+        total_rewards = []
+        for i in range(self.n):
+            actions, rewards = self.perform(i)
+            total_rewards.append(np.sum(rewards))
+            df = pd.DataFrame({'action':actions, 'reward':rewards,
+                               'run':np.ones(len(actions)) * i})
+            df_ls.append(df)
+        total_rewards = np.array(total_rewards)
+        print('total reward mean: %.2f, std: %.2f' % 
+              (np.mean(total_rewards), np.std(total_rewards)))
+
