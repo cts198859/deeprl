@@ -4,6 +4,7 @@ The implementation of deepRL agents for both discrete and continuous (only singl
 
 ## Usage
 Define all parameters in `config.ini`, and run `python3 main.py --config-path [path to config.ini]`.
+Multi-processing implementation is at multiprocess branch, in which the global wt and local batch are maintained in queues. It is not as optimal as the multi-threading implementation due to the potential lag between the generation and consumpution of each local batch.
 
 ## Example results
 **continuous control**     | discrete control
