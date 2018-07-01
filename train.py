@@ -12,6 +12,7 @@ class Trainer:
         self.save_path = save_path
         self.env = env
         self.model = model
+        self.algo = self.model.name
         self.n_step = self.model.n_step
         self._init_env_summary()
         self._init_model_summary(model_summary)
@@ -19,14 +20,17 @@ class Trainer:
 
     def _init_model_summary(self, model_summary):
         self.model_summaries = model_summary[0]
-        self.entropy_loss = model_summary[1]
-        self.policy_loss = model_summary[2]
-        self.value_loss = model_summary[3]
-        self.total_loss = model_summary[4]
-        self.lr = model_summary[5]
-        self.beta = model_summary[6]
-        self.gradnorm = model_summary[7]
-
+        self.policy_loss = model_summary[1]
+        self.value_loss = model_summary[2]
+        self.total_loss = model_summary[3]
+        self.lr = model_summary[4]
+        self.gradnorm = model_summary[5]
+        if self.algo == 'a2c':
+            self.entropy_loss = model_summary[6]
+            self.beta = model_summary[7]
+        else:
+            self.gradnorm_v = model_summary[6]
+        
     def _init_env_summary(self):
         self.total_reward = tf.placeholder(tf.float32, [])
         self.actions = tf.placeholder(tf.int32, [None])
@@ -40,15 +44,23 @@ class Trainer:
         summ = sess.run(self.env_summaries, {self.total_reward:cum_reward, self.actions:cum_actions})
         self.summary_writer.add_summary(summ, global_step=global_step)
 
-    def _add_model_summary(self, sess, entropy_loss, policy_loss, value_loss,
-                           total_loss, gradnorm, cur_lr, cur_beta, global_step):
-        summ = sess.run(self.model_summaries, {self.entropy_loss:entropy_loss,
-                                               self.policy_loss:policy_loss,
-                                               self.value_loss:value_loss,
-                                               self.total_loss:total_loss,
-                                               self.lr:cur_lr,
-                                               self.beta:cur_beta,
-                                               self.gradnorm:gradnorm})
+    def _add_model_summary(self, sess, policy_loss, value_loss,
+                           total_loss, gradnorm, cur_lr, extra1, extra2, global_step):
+        if self.algo == 'a2c':
+            summ = sess.run(self.model_summaries, {self.entropy_loss:extra1,
+                                                   self.policy_loss:policy_loss,
+                                                   self.value_loss:value_loss,
+                                                   self.total_loss:total_loss,
+                                                   self.lr:cur_lr,
+                                                   self.beta:extra2,
+                                                   self.gradnorm:gradnorm})
+        elif self.algo == 'ddpg':
+            summ = sess.run(self.model_summaries, {self.gradnorm_v:extra1,
+                                                   self.policy_loss:policy_loss,
+                                                   self.value_loss:value_loss,
+                                                   self.total_loss:total_loss,
+                                                   self.lr:cur_lr,
+                                                   self.gradnorm:gradnorm})
         self.summary_writer.add_summary(summ, global_step=global_step)
 
     def explore(self, sess, prev_ob, prev_done, cum_reward, cum_actions):
@@ -59,15 +71,25 @@ class Trainer:
                 policy, value = self.model.forward(ob, done)
                 action = np.random.choice(np.arange(len(policy)), p=policy)
             else:
-                mu, std, value = self.model.forward(ob, done)
-                action = self.env.sample_action(mu, std)
-                policy = [mu, std]
+                if self.algo == 'a2c':
+                    # TODO: relax this to multiple actions
+                    mu, std, value = self.model.forward(ob, done)
+                    action = [np.clip(np.random.randn() * std + mu, -1, 1)]
+                    policy = [mu, std]
+                elif self.algo == 'ddpg':
+                    action = self.model.forward(ob)
+                    policy = 'n/a'
+                    value = np.nan
             next_ob, reward, done, _ = self.env.step(action)
-            cum_actions.append(action)
+            # TODO: remove action?
+            cum_actions.append(action[0])
             cum_reward += reward
             global_step = self.global_counter.next()
             self.cur_step += 1
-            self.model.add_transition(ob, action, reward, value, done)
+            if self.algo == 'a2c':
+                self.model.add_transition(ob, action, reward, value, done)
+            elif self.algo == 'ddpg':
+                self.model.add_transition(ob, action, reward, next_ob, done)
             # logging
             if self.global_counter.should_log():
                 tf.logging.info('''thread %d, global step %d, local step %d, episode step %d,
@@ -77,12 +99,14 @@ class Trainer:
             # termination
             if done:
                 ob = self.env.reset()
+                if self.algo == 'ddpg':
+                    self.model.reset_noise()
                 self._add_env_summary(sess, cum_reward, cum_actions, global_step)
                 cum_reward = 0
                 cum_actions = []
             else:
                 ob = next_ob
-        if done:
+        if done or (self.algo != 'a2c'):
             R = 0
         else:
             R = self.model.forward(ob, False, 'v')
@@ -96,14 +120,21 @@ class Trainer:
         while not coord.should_stop():
             ob, done, R, cum_reward, cum_actions = self.explore(sess, ob, done, cum_reward, cum_actions)
             cur_lr = self.model.lr_scheduler.get(self.n_step)
-            cur_beta = self.model.beta_scheduler.get(self.n_step)
-            entropy_loss, policy_loss, value_loss, total_loss, gradnorm = \
-                self.model.backward(R, cur_lr, cur_beta)
+            if self.algo == 'a2c':
+                cur_beta = self.model.beta_scheduler.get(self.n_step)
+                entropy_loss, policy_loss, value_loss, total_loss, gradnorm = \
+                    self.model.backward(R, cur_lr, cur_beta)
+                extra1, extra2 = entropy_loss, cur_beta
+            elif self.algo == 'ddpg':
+                value_loss, policy_loss, total_loss, gradnorm_v, gradnorm = \
+                    self.model.backward(cur_lr)
+                extra1, extra2 = gradnorm_v, None
             global_step = self.global_counter.cur_step
-            self._add_model_summary(sess, entropy_loss, policy_loss, value_loss,
-                                    total_loss, gradnorm, cur_lr, cur_beta, global_step)
-            summ = sess.run(self.model.policy.summary)
-            self.summary_writer.add_summary(summ, global_step=global_step)
+            self._add_model_summary(sess, policy_loss, value_loss, total_loss, gradnorm,
+                                    cur_lr, extra1, extra2, global_step)
+            # do not show wt details in tensorboard
+            # summ = sess.run(self.model.policy.summary)
+            # self.summary_writer.add_summary(summ, global_step=global_step)
             self.summary_writer.flush()
             # save model
             if self.global_counter.should_save():
@@ -180,6 +211,7 @@ class Evaluator:
     def __init__(self, env, model, log_path, n_episode):
         self.env = env
         self.model = model
+        self.algo = self.model.name
         self.log_path = log_path
         self.n = n_episode
 
@@ -192,11 +224,14 @@ class Evaluator:
         while True:
             states.append(ob)
             if self.env.discrete:
-                policy = self.model.forward(ob, done, 'p')
+                policy = self.model.forward(ob, done, mode='p')
                 action = np.argmax(policy)
             else:
-                mu, std = self.model.forward(ob, done, 'p')
-                action = np.clip(mu, -1, 1)
+                if self.algo == 'a2c':
+                    mu, std = self.model.forward(ob, done, mode='p')
+                    action = np.clip(mu, -1, 1)
+                elif self.algo == 'ddpg':
+                    action = self.model.forward(ob, mode='act')
             next_ob, reward, done, raw_action = self.env.step(action)
             actions.append(raw_action)
             rewards.append(reward)
@@ -215,14 +250,14 @@ class Evaluator:
         for i in range(self.n):
             states, actions, rewards = self.perform(i)
             total_rewards.append(np.sum(rewards))
-            cur_dict = {'action':actions, 'reward':rewards,
-                        'run':np.ones(len(actions)) * i}
+            cur_dict = {'action': actions, 'reward': rewards,
+                        'run': np.ones(len(actions)) * i}
             for j in range(states.shape[1]):
-                cur_dict['state_%d' % j] = states[:,j]
+                cur_dict['state_%d' % j] = states[:, j]
             df = pd.DataFrame(cur_dict)
             df_ls.append(df)
         total_rewards = np.array(total_rewards)
-        print('total reward mean: %.2f, std: %.2f' % 
+        print('total reward mean: %.2f, std: %.2f' %
               (np.mean(total_rewards), np.std(total_rewards)))
         df = pd.concat(df_ls)
         df.to_csv(self.log_path + '/data.csv')
