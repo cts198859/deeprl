@@ -51,6 +51,7 @@ class A2C:
         self.optimizer = self.policy.optimizer
         self.lr = self.policy.lr
         self.discrete = discrete
+        self.i_thread = i_thread
 
     def init_train(self):
         pass
