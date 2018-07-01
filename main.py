@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import argparse
 import configparser
 import numpy as np
@@ -5,7 +7,7 @@ import signal
 import tensorflow as tf
 import threading
 
-from agents.models import A2C
+from agents.models import A2C, DDPG
 from envs.wrapper import GymEnv
 from train import Trainer, AsyncTrainer, Evaluator
 from utils import *
@@ -18,10 +20,12 @@ def parse_args():
                         default=default_config_path, help="config path")
     parser.add_argument('--mode', type=str, required=False,
                         default='train', help="train or evaluate")
+    parser.add_argument('--algo', type=str, required=False,
+                        default='a2c', help="a2c, ddpg, ppo")
     return parser.parse_args()
 
 
-def gym_train(parser):
+def gym_train(parser, algo):
     seed = parser.getint('TRAIN_CONFIG', 'SEED')
     num_env = parser.getint('TRAIN_CONFIG', 'NUM_ENV')
     env_name = parser.get('ENV_CONFIG', 'NAME')
@@ -39,13 +43,19 @@ def gym_train(parser):
     tf.set_random_seed(seed)
     config = tf.ConfigProto(allow_soft_placement=True)
     sess = tf.Session(config=config)
-    global_model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'],
-                       discrete=is_discrete)
+    if algo == 'a2c':
+        global_model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'],
+                           discrete=is_discrete)
+    elif algo == 'ddpg':
+        assert(not is_discrete)
+        global_model = DDPG(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
+    else:
+        global_model = None
     global_counter = GlobalCounter(total_step, save_step, log_step)
     coord = tf.train.Coordinator()
     threads = []
     trainers = []
-    model_summary = init_model_summary()
+    model_summary = init_model_summary(global_model.name)
 
     if num_env == 1:
         # regular training
@@ -53,6 +63,7 @@ def gym_train(parser):
         trainer = Trainer(env, global_model, save_path, summary_writer, global_counter, model_summary)
         trainers.append(trainer)
     else:
+        assert(algo == 'a2c')
         # asynchronous training
         lr_scheduler = global_model.lr_scheduler
         beta_scheduler = global_model.beta_scheduler
@@ -77,6 +88,7 @@ def gym_train(parser):
             trainers.append(trainer)
 
     sess.run(tf.global_variables_initializer())
+    global_model.init_train()
     saver = tf.train.Saver(max_to_keep=20)
     global_model.load(saver, save_path)
 
@@ -97,7 +109,7 @@ def gym_train(parser):
         global_model.save(saver, save_path + 'checkpoint', global_counter.cur_step)
 
 
-def gym_evaluate(parser, n_episode):
+def gym_evaluate(parser, n_episode, algo):
     seed = parser.getint('TRAIN_CONFIG', 'SEED')
     env_name = parser.get('ENV_CONFIG', 'NAME')
     is_discrete = parser.getboolean('ENV_CONFIG', 'DISCRETE')
@@ -106,8 +118,14 @@ def gym_evaluate(parser, n_episode):
     n_a = env.n_a
     n_s = env.n_s
     sess = tf.Session()
-    model = A2C(sess, n_s, n_a, -1, model_config=parser['MODEL_CONFIG'],
-                discrete=is_discrete)
+    if algo == 'a2c':
+        model = A2C(sess, n_s, n_a, -1, model_config=parser['MODEL_CONFIG'],
+                    discrete=is_discrete)
+    elif algo == 'ddpg':
+        assert(not is_discrete)
+        model = DDPG(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
+    else:
+        model = None
     base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
     save_path, log_path = init_out_dir(base_dir, 'evaluate')
     sess.run(tf.global_variables_initializer())
@@ -121,7 +139,7 @@ if __name__ == '__main__':
     parser = configparser.ConfigParser()
     parser.read(args.config_path)
     if args.mode == 'train':
-        gym_train(parser)
+        gym_train(parser, args.algo)
     elif args.mode == 'evaluate':
         n_episode = int(input('evaluation episodes: '))
-        gym_evaluate(parser, n_episode)
+        gym_evaluate(parser, n_episode, args.algo)

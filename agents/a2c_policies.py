@@ -4,7 +4,7 @@ from agents.utils import *
 import bisect
 
 
-class Policy:
+class A2CPolicy:
     def __init__(self, n_a, n_s, n_step, n_past, discrete):
         self.n_a = n_a
         self.n_s = n_s
@@ -12,13 +12,9 @@ class Policy:
         self.n_past = n_past
         self.discrete = discrete
 
-    def forward(self, ob, *_args, **_kwargs):
-        raise NotImplementedError()
-
     def _build_fc_net(self, h, n_fc, out_type):
-        h = fc(h, out_type + '_fc0', n_fc[0])
-        for i, n_fc_cur in enumerate(n_fc[1:]):
-            fc_cur = out_type + '_fc%d' % (i+1)
+        for i, n_fc_cur in enumerate(n_fc):
+            fc_cur = out_type + '_fc%d' % i
             h = fc(h, fc_cur, n_fc_cur)
         if out_type == 'pi':
             if self.discrete:
@@ -59,14 +55,14 @@ class Policy:
 
     def _continuous_policy_loss(self):
         a_norm_dist = tf.contrib.distributions.Normal(self.pi[0], self.pi[1])
-        log_prob = a_norm_dist.log_prob(self.A)
+        log_prob = a_norm_dist.log_prob(tf.squeeze(self.A, axis=1))
         entropy_loss = -tf.reduce_mean(a_norm_dist.entropy()) * self.entropy_coef
         policy_loss = -tf.reduce_mean(log_prob * self.ADV)
         return policy_loss, entropy_loss
 
     def prepare_loss(self, optimizer, lr, v_coef, max_grad_norm, alpha, epsilon):
         if not self.discrete:
-            self.A = tf.placeholder(tf.float32, [self.n_step])
+            self.A = tf.placeholder(tf.float32, [self.n_step, self.n_a])
         else:
             self.A = tf.placeholder(tf.int32, [self.n_step])
         self.ADV = tf.placeholder(tf.float32, [self.n_step])
@@ -107,11 +103,11 @@ class Policy:
         return tf.group(*sync_ops)
 
 
-class LstmPolicy(Policy):
+class A2CLstmPolicy(A2CPolicy):
     def __init__(self, n_s, n_a, n_step, i_thread, n_past=-1,
                  n_fc=[128], n_lstm=64, discrete=True):
-        Policy.__init__(self, n_a, n_s, n_step, n_past, discrete)
-        self.name = 'lstm_' + str(i_thread)
+        super().__init__(n_a, n_s, n_step, n_past, discrete)
+        self.name = 'a2clstm_' + str(i_thread)
         self.n_lstm = n_lstm
         self.n_fc = n_fc
         self.ob_fw = tf.placeholder(tf.float32, [1, n_s]) # forward 1-step
@@ -168,9 +164,9 @@ class LstmPolicy(Policy):
         # update state only when p is called
         if 'p' in out_type:
             outs.append(self.new_states)
-        out_values = sess.run(outs, {self.ob_fw:np.array([ob]),
-                                     self.done_fw:np.array([done]),
-                                     self.states:self.states_fw})
+        out_values = sess.run(outs, {self.ob_fw: np.array([ob]),
+                                     self.done_fw: np.array([done]),
+                                     self.states: self.states_fw})
         if 'p' in out_type:
             self.states_fw = out_values[-1]
             out_values = out_values[:-1]
@@ -184,20 +180,20 @@ class LstmPolicy(Policy):
 
     def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta):
         summary_out = sess.run(self.train_out + [self._train],
-                                  {self.ob_bw:obs,
-                                   self.done_bw:dones,
-                                   self.states:self.states_bw,
-                                   self.A:acts,
-                                   self.ADV:Advs,
-                                   self.R:Rs,
-                                   self.lr:cur_lr,
-                                   self.entropy_coef:cur_beta})
+                               {self.ob_bw: obs,
+                                self.done_bw: dones,
+                                self.states: self.states_bw,
+                                self.A: acts,
+                                self.ADV: Advs,
+                                self.R: Rs,
+                                self.lr: cur_lr,
+                                self.entropy_coef: cur_beta})
         self.states_bw = np.copy(self.states_fw)
         return summary_out[:-1]
 
     def _backward_policy(self, sess, obs, dones):
-        pi = sess.run(self.pi, {self.ob_bw:obs, self.done_bw:dones,
-                                self.states:self.states_bw})
+        pi = sess.run(self.pi, {self.ob_bw: obs, self.done_bw: dones,
+                                self.states: self.states_bw})
         self.states_bw = np.copy(self.states_fw)
         return pi
 
@@ -213,11 +209,11 @@ class LstmPolicy(Policy):
         return outs
 
 
-class Cnn1DPolicy(Policy):
+class A2CCnn1DPolicy(A2CPolicy):
     def __init__(self, n_s, n_a, n_step, i_thread, n_past=10,
                  n_fc=[128], n_filter=64, m_filter=3, discrete=True):
-        Policy.__init__(self, n_a, n_s, n_step, n_past, discrete)
-        self.name = 'cnn1d_' + str(i_thread)
+        super().__init__(n_a, n_s, n_step, n_past, discrete)
+        self.name = 'a2ccnn1d_' + str(i_thread)
         self.n_filter = n_filter
         self.m_filter = m_filter
         self.obs = tf.placeholder(tf.float32, [None, n_past, n_s])
@@ -285,24 +281,24 @@ class Cnn1DPolicy(Policy):
     def forward(self, sess, ob, done, out_type='pv'):
         ob = self._recent_ob(np.array([ob]), np.array([done]))
         outs = self._get_forward_outs(out_type)
-        out_values = sess.run(outs, {self.obs:ob})
+        out_values = sess.run(outs, {self.obs: ob})
         return self._return_forward_outs(out_values)
 
     def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta):
         obs = self._recent_ob(np.array(obs), np.array(dones),  ob_type='backward')
         summary_out = sess.run(self.train_out + [self._train],
-                                  {self.obs:obs,
-                                   self.A:acts,
-                                   self.ADV:Advs,
-                                   self.R:Rs,
-                                   self.lr:cur_lr,
-                                   self.entropy_coef:cur_beta})
+                               {self.obs: obs,
+                                self.A: acts,
+                                self.ADV: Advs,
+                                self.R: Rs,
+                                self.lr: cur_lr,
+                                self.entropy_coef: cur_beta})
         return summary_out[:-1]
 
     def _backward_policy(self, sess, obs, dones):
         obs = self._recent_ob(np.array(obs), np.array(dones),  ob_type='backward')
         print(obs)
-        return sess.run(self.pi, {self.obs:obs})
+        return sess.run(self.pi, {self.obs: obs})
 
 
 def test_forward_backward_policies(sess, policy, x, done):
@@ -321,8 +317,8 @@ def test_forward_backward_policies(sess, policy, x, done):
 def test_policies():
     sess = tf.Session()
     n_s, n_a, n_step, n_past = 3, 2, 5, 8
-    p_lstm = LstmPolicy(n_s, n_a, n_step, n_lstm=5)
-    p_cnn1 = Cnn1DPolicy(n_s, n_a, n_step, n_past)
+    p_lstm = A2CLstmPolicy(n_s, n_a, n_step, n_lstm=5)
+    p_cnn1 = A2CCnn1DPolicy(n_s, n_a, n_step, n_past)
     sess.run(tf.global_variables_initializer())
     print('=' * 16 + 'first batch' + '=' * 16)
     x = np.random.randn(n_step, n_s)

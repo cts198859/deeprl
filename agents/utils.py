@@ -1,4 +1,5 @@
 import numpy as np
+import random
 import tensorflow as tf
 
 """
@@ -161,35 +162,27 @@ def test_layers():
             print(out[0].shape)
 
 """
-buffers
+experience buffers
 """
-class TransBuffer:
-    def reset(self):
-        self.buffer = []
-
-    @property
-    def size(self):
-        return len(self.buffer)
-
+class ExpBuffer:
     def add_transition(self, ob, a, r, *_args, **_kwargs):
+        raise NotImplementedError()
+
+    def reset(self):
         raise NotImplementedError()
 
     def sample_transition(self, *_args, **_kwargs):
         raise NotImplementedError()
 
+    @property
+    def size(self):
+        raise NotImplementedError()
 
-class OnPolicyBuffer(TransBuffer):
+
+class OnPolicyBuffer(ExpBuffer):
     def __init__(self, gamma):
         self.gamma = gamma
         self.reset()
-
-    def reset(self, done=False):
-        # the done before each step is required
-        self.obs = []
-        self.acts = []
-        self.rs = []
-        self.vs = []
-        self.dones = [done]
 
     def add_transition(self, ob, a, r, v, done):
         self.obs.append(ob)
@@ -198,19 +191,13 @@ class OnPolicyBuffer(TransBuffer):
         self.vs.append(v)
         self.dones.append(done)
 
-    def _add_R_Adv(self, R):
-        Rs = []
-        Advs = []
-        # use post-step dones here
-        for r, v, done in zip(self.rs[::-1], self.vs[::-1], self.dones[:0:-1]):
-            R = r + self.gamma * R * (1.-done)
-            Adv = R - v
-            Rs.append(R)
-            Advs.append(Adv)
-        Rs.reverse()
-        Advs.reverse()
-        self.Rs = Rs
-        self.Advs = Advs
+    def reset(self, done=False):
+        # the done before each step is required
+        self.obs = []
+        self.acts = []
+        self.rs = []
+        self.vs = []
+        self.dones = [done]
 
     def sample_transition(self, R, discrete=True):
         self._add_R_Adv(R)
@@ -226,6 +213,58 @@ class OnPolicyBuffer(TransBuffer):
         self.reset(self.dones[-1])
         return obs, acts, dones, Rs, Advs
 
+    @property
+    def size(self):
+        return len(self.rs)
+
+    def _add_R_Adv(self, R):
+        Rs = []
+        Advs = []
+        # use post-step dones here
+        for r, v, done in zip(self.rs[::-1], self.vs[::-1], self.dones[:0:-1]):
+            R = r + self.gamma * R * (1.-done)
+            Adv = R - v
+            Rs.append(R)
+            Advs.append(Adv)
+        Rs.reverse()
+        Advs.reverse()
+        self.Rs = Rs
+        self.Advs = Advs
+
+
+class ReplayBuffer(ExpBuffer):
+    def __init__(self, buffer_size, batch_size):
+        self.buffer_size = buffer_size
+        self.batch_size = batch_size
+        self.cum_size = 0
+        self.buffer = []
+
+    def add_transition(self, ob, a, r, next_ob, done):
+        experience = (ob, a, r, next_ob, done)
+        if self.cum_size < self.buffer_size:
+            self.buffer.append(experience)
+        else:
+            ind = self.cum_size % self.buffer_size
+            self.buffer[ind] = experience
+        self.cum_size += 1
+
+    def reset(self):
+        self.buffer = []
+        self.cum_size = 0
+
+    def sample_transition(self):
+        # Randomly sample batch_size examples
+        minibatch = random.sample(self.buffer, self.batch_size)
+        state_batch = np.asarray([data[0] for data in minibatch])
+        action_batch = np.asarray([data[1] for data in minibatch])
+        next_state_batch = np.asarray([data[3] for data in minibatch])
+        reward_batch = np.asarray([data[2] for data in minibatch])
+        done_batch = np.asarray([data[4] for data in minibatch])
+        return state_batch, action_batch, next_state_batch, reward_batch, done_batch
+
+    @property
+    def size(self):
+        return min(self.buffer_size, self.cum_size)
 
 """
 util functions
@@ -244,6 +283,13 @@ class Scheduler:
             return max(self.val_min, self.val * (1 - self.n / self.N))
         else:
             return self.val
+
+
+class OUNoise:
+    def __init__(self, theta=0.15, sigma=0.1):
+        self.name = 'ou'
+        self.theta = theta
+        self.sigma = sigma
 
 
 if __name__ == '__main__':
