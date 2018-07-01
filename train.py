@@ -74,7 +74,7 @@ class Trainer:
                 if self.algo == 'a2c':
                     # TODO: relax this to multiple actions
                     mu, std, value = self.model.forward(ob, done)
-                    action = [np.clip(np.random.randn() * std + mu, -1, 1)]
+                    action = np.array([np.clip(np.random.randn() * std + mu, -1, 1)])
                     policy = [mu, std]
                 elif self.algo == 'ddpg':
                     action = self.model.forward(ob)
@@ -93,7 +93,7 @@ class Trainer:
             # logging
             if self.global_counter.should_log():
                 tf.logging.info('''thread %d, global step %d, local step %d, episode step %d,
-                                   ob: %s, a: %.2f, pi: %s, v: %.2f, r: %.2f, done: %r''' %
+                                   ob: %s, a: %r, pi: %s, v: %.2f, r: %.2f, done: %r''' %
                                 (self.i_thread, global_step, self.cur_step, len(cum_actions),
                                  str(ob), action, str(policy), value, reward, done))
             # termination
