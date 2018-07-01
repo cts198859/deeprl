@@ -55,14 +55,14 @@ class A2CPolicy:
 
     def _continuous_policy_loss(self):
         a_norm_dist = tf.contrib.distributions.Normal(self.pi[0], self.pi[1])
-        log_prob = a_norm_dist.log_prob(self.A)
+        log_prob = a_norm_dist.log_prob(tf.squeeze(self.A, axis=1))
         entropy_loss = -tf.reduce_mean(a_norm_dist.entropy()) * self.entropy_coef
         policy_loss = -tf.reduce_mean(log_prob * self.ADV)
         return policy_loss, entropy_loss
 
     def prepare_loss(self, optimizer, lr, v_coef, max_grad_norm, alpha, epsilon):
         if not self.discrete:
-            self.A = tf.placeholder(tf.float32, [self.n_step])
+            self.A = tf.placeholder(tf.float32, [self.n_step, self.n_a])
         else:
             self.A = tf.placeholder(tf.int32, [self.n_step])
         self.ADV = tf.placeholder(tf.float32, [self.n_step])
