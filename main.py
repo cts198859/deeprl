@@ -108,6 +108,8 @@ def gym_train(parser, algo):
     coord.request_stop()
     coord.join(threads)
     save_flag = input('save final model? Y/N: ')
+    if parser.getboolean('ENV_CONFIG', 'ISDRONEENV'):
+        env.get_results_df().to_csv(base_dir + 'model_statistics.csv')
     if save_flag.lower().startswith('y'):
         print('saving model at step %d ...' % global_counter.cur_step)
         global_model.save(saver, save_path + 'checkpoint', global_counter.cur_step)

@@ -46,7 +46,11 @@ class DroneEnv:
             ob, r, done, info = env.step(action)
             return scale_ob(ob), r, done, action
 
+        def get_results_df():
+            return env.results_df
+
         self.seed = env.seed
         self.step = step
         self.reset = reset
+        self.get_results_df = get_results_df
 
