@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-
 import argparse
 import configparser
 import numpy as np
 import signal
 import tensorflow as tf
 import threading
+import os
 
 from agents.models import A2C, DDPG
 from envs.wrapper import GymEnv
@@ -13,6 +13,7 @@ from envs.drone_wrapper import DroneEnv
 from train import Trainer, AsyncTrainer, Evaluator
 from utils import *
 
+RL_RESULT_DIR = os.environ["RL_RESULT_DIR"]
 
 def parse_args():
     default_config_path = '/Users/tchu/Documents/Uhana/remote/deeprl/config.ini'
@@ -39,7 +40,7 @@ def gym_train(parser, algo):
     n_a = env.n_a
     n_s = env.n_s
     total_step = int(parser.getfloat('TRAIN_CONFIG', 'MAX_STEP'))
-    base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
+    base_dir = RL_RESULT_DIR + '/drone_with_RL_results/'
     save_step = int(parser.getfloat('TRAIN_CONFIG', 'SAVE_INTERVAL'))
     log_step = int(parser.getfloat('TRAIN_CONFIG', 'LOG_INTERVAL'))
     save_path, log_path = init_out_dir(base_dir, 'train')
@@ -133,7 +134,8 @@ def gym_evaluate(parser, n_episode, algo):
         model = DDPG(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
     else:
         model = None
-    base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
+    #base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
+    base_dir = RL_RESULT_DIR + '/drone_with_RL_results/'
     save_path, log_path = init_out_dir(base_dir, 'evaluate')
     sess.run(tf.global_variables_initializer())
     saver = tf.train.Saver()
