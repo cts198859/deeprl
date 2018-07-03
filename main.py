@@ -9,6 +9,7 @@ import threading
 
 from agents.models import A2C, DDPG
 from envs.wrapper import GymEnv
+from envs.drone_wrapper import DroneEnv
 from train import Trainer, AsyncTrainer, Evaluator
 from utils import *
 
@@ -30,7 +31,10 @@ def gym_train(parser, algo):
     num_env = parser.getint('TRAIN_CONFIG', 'NUM_ENV')
     env_name = parser.get('ENV_CONFIG', 'NAME')
     is_discrete = parser.getboolean('ENV_CONFIG', 'DISCRETE')
-    env = GymEnv(env_name, is_discrete)
+    if parser.getboolean('ENV_CONFIG', 'ISDRONEENV'):
+        env = DroneEnv(env_name, is_discrete)
+    else:
+        env = GymEnv(env_name, is_discrete)
     env.seed(seed)
     n_a = env.n_a
     n_s = env.n_s
@@ -113,7 +117,10 @@ def gym_evaluate(parser, n_episode, algo):
     seed = parser.getint('TRAIN_CONFIG', 'SEED')
     env_name = parser.get('ENV_CONFIG', 'NAME')
     is_discrete = parser.getboolean('ENV_CONFIG', 'DISCRETE')
-    env = GymEnv(env_name, is_discrete)
+    if parser.getboolean('ENV_CONFIG', 'ISDRONEENV'):
+        env = DroneEnv(env_name, is_discrete)
+    else:
+        env = GymEnv(env_name, is_discrete)
     env.seed(seed)
     n_a = env.n_a
     n_s = env.n_s
@@ -143,3 +150,4 @@ if __name__ == '__main__':
     elif args.mode == 'evaluate':
         n_episode = int(input('evaluation episodes: '))
         gym_evaluate(parser, n_episode, args.algo)
+
