@@ -9,13 +9,10 @@ sys.path.insert(0, PATH_TO_DEEPCUT_CODE)
 import drone_environment
 import simple_rmse
 
-BANDWIDTH_FILE_NAME = PATH_TO_DEEPCUT_RES + "/traces/bandwidth_trace_exp2.csv"
-IMAGE_FILE_NAME = PATH_TO_DEEPCUT_RES +  "/traces/image_trace_exp2.csv"
-
 class DroneEnv:
     def __init__(self, name, discrete=True):
-        bg = drone_environment.BandwidthGenerator(BANDWIDTH_FILE_NAME)
-        dg = drone_environment.DataGenerator(IMAGE_FILE_NAME)
+        bg = drone_environment.BandwidthGenerator(0)
+        dg = drone_environment.DataGenerator(0)
         nn = simple_rmse.model()
         env = drone_environment.DroneEnvironment(bg, dg, nn, discrete)
         self.discrete = discrete
