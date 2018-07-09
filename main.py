@@ -127,6 +127,7 @@ def gym_evaluate(parser, n_episode, algo):
     n_a = env.n_a
     n_s = env.n_s
     sess = tf.Session()
+    total_step = int(parser.getfloat('TRAIN_CONFIG', 'MAX_STEP'))
     if algo == 'a2c':
         model = A2C(sess, n_s, n_a, -1, model_config=parser['MODEL_CONFIG'],
                     discrete=is_discrete)

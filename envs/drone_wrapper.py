@@ -12,7 +12,7 @@ import simple_rmse
 class DroneEnv:
     def __init__(self, name, discrete=True):
         bg = drone_environment.BandwidthGenerator(0)
-        dg = drone_environment.DataGenerator(0)
+        dg = drone_environment.DataGenerator(0, True)
         nn = simple_rmse.model()
         env = drone_environment.DroneEnvironment(bg, dg, nn, discrete)
         self.discrete = discrete
