@@ -23,6 +23,9 @@ def parse_args():
                         default='train', help="train or evaluate")
     parser.add_argument('--algo', type=str, required=False,
                         default='a2c', help="a2c, ddpg, ppo")
+    parser.add_argument('--n_episode', type=int, required=False,
+                        default=2, help="how many times to run a pre-trained RL model")
+
     return parser.parse_args()
 
 
@@ -144,6 +147,10 @@ def gym_evaluate(parser, n_episode, algo):
     evaluator = Evaluator(env, model, log_path, n_episode)
     evaluator.run()
 
+    if parser.getboolean('ENV_CONFIG', 'ISDRONEENV'):
+        env.get_results_df().to_csv(log_path + '/evaluate_RL_model_statistics.csv')
+
+
 if __name__ == '__main__':
     args = parse_args()
     parser = configparser.ConfigParser()
@@ -151,6 +158,6 @@ if __name__ == '__main__':
     if args.mode == 'train':
         gym_train(parser, args.algo)
     elif args.mode == 'evaluate':
-        n_episode = int(input('evaluation episodes: '))
+        n_episode = int(args.n_episode)
         gym_evaluate(parser, n_episode, args.algo)
 
