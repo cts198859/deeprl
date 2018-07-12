@@ -7,13 +7,13 @@ PATH_TO_DEEPCUT_RES = os.environ["DEEPCUT_RESULT_DIR"]
 
 sys.path.insert(0, PATH_TO_DEEPCUT_CODE)
 import drone_environment
-import simple_rmse
+import localization_nn
 
 class DroneEnv:
     def __init__(self, name, discrete=True):
         bg = drone_environment.BandwidthGenerator(0)
-        dg = drone_environment.DataGenerator(0, True)
-        nn = simple_rmse.model()
+        dg = drone_environment.DataGenerator(0, False)
+        nn = localization_nn.model()
         env = drone_environment.DroneEnvironment(bg, dg, nn, discrete)
         self.discrete = discrete
         if discrete:
