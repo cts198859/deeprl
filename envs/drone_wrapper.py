@@ -7,16 +7,13 @@ PATH_TO_DEEPCUT_RES = os.environ["DEEPCUT_RESULT_DIR"]
 
 sys.path.insert(0, PATH_TO_DEEPCUT_CODE)
 import drone_environment
-import simple_rmse
-
-BANDWIDTH_FILE_NAME = PATH_TO_DEEPCUT_RES + "/traces/bandwidth_trace_exp2.csv"
-IMAGE_FILE_NAME = PATH_TO_DEEPCUT_RES +  "/traces/image_trace_exp2.csv"
+import localization_nn
 
 class DroneEnv:
     def __init__(self, name, discrete=True):
-        bg = drone_environment.BandwidthGenerator(BANDWIDTH_FILE_NAME)
-        dg = drone_environment.DataGenerator(IMAGE_FILE_NAME)
-        nn = simple_rmse.model()
+        bg = drone_environment.BandwidthGenerator(0)
+        dg = drone_environment.DataGenerator(0, False)
+        nn = localization_nn.model()
         env = drone_environment.DroneEnvironment(bg, dg, nn, discrete)
         self.discrete = discrete
         if discrete:
@@ -46,7 +43,11 @@ class DroneEnv:
             ob, r, done, info = env.step(action)
             return scale_ob(ob), r, done, action
 
+        def get_results_df():
+            return env.results_df
+
         self.seed = env.seed
         self.step = step
         self.reset = reset
+        self.get_results_df = get_results_df
 

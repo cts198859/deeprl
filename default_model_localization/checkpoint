@@ -1,0 +1,2 @@
+model_checkpoint_path: "/Users/eyalcidon/workspace/deeprl/results_deepcut/drone_with_RL_results//model/checkpoint-21795"
+all_model_checkpoint_paths: "/Users/eyalcidon/workspace/deeprl/results_deepcut/drone_with_RL_results//model/checkpoint-21795"

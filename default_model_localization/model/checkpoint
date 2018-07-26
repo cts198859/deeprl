@@ -1,0 +1,2 @@
+model_checkpoint_path: "/Users/jenyapergament/Documents/Research/Betteroff/RL_code/deeprl/results/drone_with_RL_results//model/checkpoint-26050"
+all_model_checkpoint_paths: "/Users/jenyapergament/Documents/Research/Betteroff/RL_code/deeprl/results/drone_with_RL_results//model/checkpoint-26050"
