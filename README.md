@@ -1,6 +1,15 @@
 # DeepRL
 ## Purpose
-The implementation of deepRL agents for both discrete and continuous (only single dimension) controls. The inputs are time series measurements and the output is the control. 
+The implementation of deepRL agents for both discrete and continuous controls, with time series measurements as inputs. 
+
+### Supported algorithms
+* [A2C](https://arxiv.org/abs/1602.01783)
+* [DDPG](https://arxiv.org/abs/1509.02971)
+* [PPO(clip)](https://arxiv.org/abs/1707.06347)
+* [Dueling Q (ongoing)](https://arxiv.org/abs/1511.06581)
+
+### Supported NN structures
+fully-connected, 1d-convolutional, lstm (on-policy algorithms only). 
 
 ## Usage
 Define all parameters in `config.ini`, and run `python3 main.py --config-path [path to config.ini]`. This is in run.sh
