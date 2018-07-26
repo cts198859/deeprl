@@ -250,7 +250,7 @@ class Evaluator:
         for i in range(self.n):
             states, actions, rewards = self.perform(i)
             total_rewards.append(np.sum(rewards))
-            cur_dict = {'action': actions, 'reward': rewards,
+            cur_dict = {'action': str(actions), 'reward': rewards,
                         'run': np.ones(len(actions)) * i}
             for j in range(states.shape[1]):
                 cur_dict['state_%d' % j] = states[:, j]

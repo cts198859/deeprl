@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
+
 import argparse
 import configparser
 import numpy as np
 import signal
 import tensorflow as tf
 import threading
-import os
 
 from agents.models import A2C, DDPG
 from envs.wrapper import GymEnv
@@ -13,7 +13,6 @@ from envs.drone_wrapper import DroneEnv
 from train import Trainer, AsyncTrainer, Evaluator
 from utils import *
 
-RL_RESULT_DIR = os.environ["RL_RESULT_DIR"]
 
 def parse_args():
     default_config_path = '/Users/tchu/Documents/Uhana/remote/deeprl/config.ini'
@@ -24,6 +23,9 @@ def parse_args():
                         default='train', help="train or evaluate")
     parser.add_argument('--algo', type=str, required=False,
                         default='a2c', help="a2c, ddpg, ppo")
+    parser.add_argument('--n_episode', type=int, required=False,
+                        default=2, help="how many times to run a pre-trained RL model")
+
     return parser.parse_args()
 
 
@@ -40,7 +42,7 @@ def gym_train(parser, algo):
     n_a = env.n_a
     n_s = env.n_s
     total_step = int(parser.getfloat('TRAIN_CONFIG', 'MAX_STEP'))
-    base_dir = RL_RESULT_DIR + '/drone_with_RL_results/'
+    base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
     save_step = int(parser.getfloat('TRAIN_CONFIG', 'SAVE_INTERVAL'))
     log_step = int(parser.getfloat('TRAIN_CONFIG', 'LOG_INTERVAL'))
     save_path, log_path = init_out_dir(base_dir, 'train')
@@ -109,6 +111,8 @@ def gym_train(parser, algo):
     coord.request_stop()
     coord.join(threads)
     save_flag = input('save final model? Y/N: ')
+    if parser.getboolean('ENV_CONFIG', 'ISDRONEENV'):
+        env.get_results_df().to_csv(base_dir + 'model_statistics.csv')
     if save_flag.lower().startswith('y'):
         print('saving model at step %d ...' % global_counter.cur_step)
         global_model.save(saver, save_path + 'checkpoint', global_counter.cur_step)
@@ -126,6 +130,7 @@ def gym_evaluate(parser, n_episode, algo):
     n_a = env.n_a
     n_s = env.n_s
     sess = tf.Session()
+    total_step = int(parser.getfloat('TRAIN_CONFIG', 'MAX_STEP'))
     if algo == 'a2c':
         model = A2C(sess, n_s, n_a, -1, model_config=parser['MODEL_CONFIG'],
                     discrete=is_discrete)
@@ -134,14 +139,17 @@ def gym_evaluate(parser, n_episode, algo):
         model = DDPG(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'])
     else:
         model = None
-    #base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
-    base_dir = RL_RESULT_DIR + '/drone_with_RL_results/'
+    base_dir = parser.get('TRAIN_CONFIG', 'BASE_DIR')
     save_path, log_path = init_out_dir(base_dir, 'evaluate')
     sess.run(tf.global_variables_initializer())
     saver = tf.train.Saver()
     model.load(saver, save_path)
     evaluator = Evaluator(env, model, log_path, n_episode)
     evaluator.run()
+
+    if parser.getboolean('ENV_CONFIG', 'ISDRONEENV'):
+        env.get_results_df().to_csv(log_path + '/evaluate_RL_model_statistics.csv')
+
 
 if __name__ == '__main__':
     args = parse_args()
@@ -150,6 +158,6 @@ if __name__ == '__main__':
     if args.mode == 'train':
         gym_train(parser, args.algo)
     elif args.mode == 'evaluate':
-        n_episode = int(input('evaluation episodes: '))
+        n_episode = int(args.n_episode)
         gym_evaluate(parser, n_episode, args.algo)
 
