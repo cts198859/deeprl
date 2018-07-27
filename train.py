@@ -176,7 +176,7 @@ class Trainer:
 class AsyncTrainer(Trainer):
     def __init__(self, env, model, save_path, summary_writer, global_counter,
                  i_thread, lr_scheduler, beta_scheduler, model_summary, wt_summary,
-                 reward_summary=None):
+                 reward_summary=None, clip_scheduler=None):
         self.cur_step = 0
         self.i_thread = i_thread
         self.global_counter = global_counter
@@ -186,6 +186,7 @@ class AsyncTrainer(Trainer):
         self.n_step = self.model.n_step
         self.lr_scheduler = lr_scheduler
         self.beta_scheduler = beta_scheduler
+        self.clip_scheduler = clip_scheduler
         self.summary_writer = summary_writer
         self._init_env_summary(reward_summary, i_thread)
         self._init_model_summary(model_summary)
@@ -222,7 +223,7 @@ class AsyncTrainer(Trainer):
                     self.model.backward(R, cur_lr, cur_beta)
                 extras = [entropy_loss, cur_beta]
             elif self.algo == 'ppo':
-                cur_clip = self.model.clip_scheduler.get(self.n_step)
+                cur_clip = self.clip_scheduler.get(self.n_step)
                 entropy_loss, policy_loss, value_loss, total_loss, gradnorm, policy_kl, clip_rate = \
                     self.model.backward(R, cur_lr, cur_beta, cur_clip)
                 extras = [entropy_loss, cur_beta, policy_kl, clip_rate]

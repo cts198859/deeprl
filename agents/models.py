@@ -103,8 +103,9 @@ class A2C:
         gamma = model_config.getfloat('GAMMA')
         self.policy.prepare_loss(optimizer, lr, v_coef, max_grad_norm, alpha, epsilon)
         self.trans_buffer = OnPolicyBuffer(gamma)
-        self.optimizer = self.policy.optimizer
-        self.lr = self.policy.lr
+        if self.i_thread == -1:
+            self.optimizer = self.policy.optimizer
+            self.lr = self.policy.lr
 
 
 class PPO(A2C):
@@ -165,8 +166,10 @@ class PPO(A2C):
         gamma = model_config.getfloat('GAMMA')
         self.policy.prepare_loss(optimizer, lr, v_coef, max_grad_norm, alpha, epsilon, clip)
         self.trans_buffer = PPOBuffer(gamma)
-        self.optimizer = self.policy.optimizer
-        self.lr = self.policy.lr
+        if self.i_thread == -1:
+            self.optimizer = self.policy.optimizer
+            self.lr = self.policy.lr
+            self.clip = self.policy.clip
 
 class DDPG(A2C):
     def __init__(self, sess, n_s, n_a, total_step, model_config=None, i_thread=-1):
