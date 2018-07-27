@@ -61,9 +61,12 @@ def init_model_summary(algo):
     total_loss = tf.placeholder(tf.float32, [])
     lr = tf.placeholder(tf.float32, [])
     gradnorm = tf.placeholder(tf.float32, [])
-    if algo == 'a2c':
+    if algo in ['a2c', 'ppo']:
         entropy_loss = tf.placeholder(tf.float32, [])
         beta = tf.placeholder(tf.float32, [])
+        if algo == 'ppo':
+            policy_kl = tf.placeholder(tf.float32, [])
+            clip_rate = tf.placeholder(tf.float32, [])
     elif algo == 'ddpg':
         gradnorm_v = tf.placeholder(tf.float32, [])
     summaries = []
@@ -72,12 +75,19 @@ def init_model_summary(algo):
     summaries.append(tf.summary.scalar('loss/total', total_loss))
     summaries.append(tf.summary.scalar('train/lr', lr))
     summaries.append(tf.summary.scalar('train/gradnorm', gradnorm))
-    if algo == 'a2c':
+    if algo in ['a2c', 'ppo']:
         summaries.append(tf.summary.scalar('loss/entropy', entropy_loss))
         summaries.append(tf.summary.scalar('train/beta', beta))
+        if algo == 'a2c':
+            summary = tf.summary.merge(summaries)
+            return (summary, policy_loss, value_loss,
+                    total_loss, lr, gradnorm, entropy_loss, beta)
+        summaries.append(tf.summary.scalar('train/policy_kl', policy_kl))
+        summaries.append(tf.summary.scalar('train/clip_rate', clip_rate))
         summary = tf.summary.merge(summaries)
         return (summary, policy_loss, value_loss,
-                total_loss, lr, gradnorm, entropy_loss, beta)
+                total_loss, lr, gradnorm, entropy_loss,
+                beta, policy_kl, clip_rate)
     elif algo == 'ddpg':
         summaries.append(tf.summary.scalar('train/gradnorm_value', gradnorm_v))
         summary = tf.summary.merge(summaries)

@@ -232,6 +232,46 @@ class OnPolicyBuffer(ExpBuffer):
         self.Advs = Advs
 
 
+class PPOBuffer(OnPolicyBuffer):
+    def __init__(self, gamma):
+        self.gamma = gamma
+        self.reset()
+
+    def add_transition(self, ob, a, r, v, done, logprob):
+        self.obs.append(ob)
+        self.acts.append(a)
+        self.rs.append(r)
+        self.vs.append(v)
+        self.dones.append(done)
+        self.logprobs.append(logprob)
+
+    def reset(self, done=False):
+        # the done before each step is required
+        self.obs = []
+        self.acts = []
+        self.rs = []
+        self.vs = []
+        self.logprobs = []
+        self.dones = [done]
+
+    def sample_transition(self, R, discrete=True):
+        self._add_R_Adv(R)
+        obs = np.array(self.obs, dtype=np.float32)
+        if discrete:
+            acts = np.array(self.acts, dtype=np.int32)
+        else:
+            acts = np.array(self.acts, dtype=np.float32)
+        Rs = np.array(self.Rs, dtype=np.float32)
+        Advs = np.array(self.Advs, dtype=np.float32)
+        Vs = np.array(self.vs, dtype=np.float32)
+        Logprobs = np.array(self.logprobs, dtype=np.float32)
+        # use pre-step dones here
+        dones = np.array(self.dones[:-1], dtype=np.bool)
+        self.reset(self.dones[-1])
+        return obs, acts, dones, Rs, Advs, Vs, Logprobs
+
+
+
 class ReplayBuffer(ExpBuffer):
     def __init__(self, buffer_size, batch_size):
         self.buffer_size = buffer_size
