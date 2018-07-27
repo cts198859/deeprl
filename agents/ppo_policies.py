@@ -70,7 +70,7 @@ class PPOPolicy(A2CPolicy):
             a_norm_dist = tf.contrib.distributions.Normal(pi[0], pi[1])
             log_prob = a_norm_dist.log_prob(tf.squeeze(A, axis=1))
             entropy = a_norm_dist.entropy()
-        return log_prob, entropy
+        return tf.squeeze(log_prob), entropy
 
     def _policy_loss(self):
         logprob, entropy = self._get_logprob(self.pi, self.A)
@@ -202,11 +202,11 @@ class PPOCnn1DPolicy(PPOPolicy):
         self.m_filter = m_filter
         self.obs = tf.placeholder(tf.float32, [None, n_past, n_s])
         if not self.discrete:
-            self.A = tf.placeholder(tf.float32, [None, self.n_a])
+            self.A = tf.placeholder(tf.float32, [None, n_a])
         else:
             self.A = tf.placeholder(tf.int32, [None])
         with tf.variable_scope(self.name):
-            # pi and v use separate nets 
+            # pi and v use separate nets
             self.pi = self._build_net(n_fc, 'pi')
             self.v = self._build_net(n_fc, 'v')
             self.a = self._sample_action(self.pi)

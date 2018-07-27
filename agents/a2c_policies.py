@@ -20,11 +20,11 @@ class A2CPolicy:
             if self.discrete:
                 pi = fc(h, out_type, self.n_a, act=tf.nn.softmax)
                 return tf.squeeze(pi)
-            else: 
+            else:
                 mu = fc(h, 'mu', self.n_a, act=tf.nn.tanh)
                 std = fc(h, 'std', self.n_a, act=tf.nn.tanh) + 1
                 # need 1e-3 to avoid log_prob explosion
-                return [tf.squeeze(mu), tf.squeeze(std) + 1e-3]
+                return [tf.squeeze(mu),  tf.squeeze(std) + 1e-3]
         else:
             v = fc(h, out_type, 1, act=lambda x: x)
             return tf.squeeze(v)
@@ -99,10 +99,13 @@ class A2CPolicy:
     def _sample_action(self, pi):
         if self.discrete:
             log_pi = tf.log(tf.clip_by_value(pi, 1e-10, 1.0))
-            return tf.cast(tf.squeeze(tf.multinomial(log_pi, 1)), tf.int32)
+            return tf.cast(tf.squeeze(tf.multinomial([log_pi], 1)), tf.int32)
         else:
-            a = pi[0] + pi[1] * tf.random_normal()
-            return tf.clip_by_value(a, -1, 1)
+            a = pi[0] + pi[1] * tf.random_normal(tf.shape(pi[0]))
+            a_clip = tf.clip_by_value(a, -1, 1)
+            if self.n_a > 1:
+                return a_clip
+            return [a_clip]
 
     @staticmethod
     def _sync_wt(global_wt, local_wt):

@@ -31,7 +31,7 @@ class GymEnv:
             if not discrete:
                 action = action * a_scale + a_mean
             ob, r, done, info = env.step(action)
-            return scale_ob(ob), r, done, action
+            return scale_ob(np.ravel(ob)), r, done, action
 
         self.seed = env.seed
         self.step = step

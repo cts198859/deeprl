@@ -33,7 +33,7 @@ class Trainer:
                 self.clip_rate = model_summary[9]
         elif self.algo == 'ddpg':
             self.gradnorm_v = model_summary[6]
-        
+
     def _init_env_summary(self):
         self.total_reward = tf.placeholder(tf.float32, [])
         self.actions = tf.placeholder(tf.int32, [None])
