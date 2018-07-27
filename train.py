@@ -82,18 +82,16 @@ class Trainer:
         for _ in range(self.n_step):
             if self.env.discrete:
                 if self.algo == 'a2c':
-                    policy, value = self.model.forward(ob, done)
+                    action, policy, value = self.model.forward(ob, done)
                 elif self.algo == 'ppo':
-                    policy, value, logprob = self.model.forward(ob, done)
-                action = np.random.choice(np.arange(len(policy)), p=policy)
+                    action, policy, value, logprob = self.model.forward(ob, done)
             else:
                 if self.algo in ['a2c', 'ppo']:
                     # TODO: relax this to multiple actions
                     if self.algo == 'a2c':
-                        mu, std, value = self.model.forward(ob, done)
+                        action, mu, std, value = self.model.forward(ob, done)
                     else:
-                        mu, std, value, logprob = self.model.forward(ob, done)
-                    action = np.array([np.clip(np.random.randn() * std + mu, -1, 1)])
+                        action, mu, std, value, logprob = self.model.forward(ob, done)
                     policy = [mu, std]
                 elif self.algo == 'ddpg':
                     action = self.model.forward(ob)
@@ -127,7 +125,7 @@ class Trainer:
                 cum_actions = []
             else:
                 ob = next_ob
-        if done or (self.algo != 'a2c'):
+        if done or (self.algo == 'ddpg'):
             R = 0
         else:
             R = self.model.forward(ob, False, 'v')
@@ -183,6 +181,7 @@ class AsyncTrainer(Trainer):
         self.save_path = save_path
         self.env = env
         self.model = model
+        self.algo = self.model.name
         self.n_step = self.model.n_step
         self.lr_scheduler = lr_scheduler
         self.beta_scheduler = beta_scheduler
@@ -259,11 +258,11 @@ class Evaluator:
         while True:
             states.append(ob)
             if self.env.discrete:
-                policy = self.model.forward(ob, done, mode='p')
+                _, policy = self.model.forward(ob, done, mode='p')
                 action = np.argmax(policy)
             else:
                 if self.algo in ['a2c', 'ppo']:
-                    mu, std = self.model.forward(ob, done, mode='p')
+                    _, mu, _ = self.model.forward(ob, done, mode='p')
                     action = np.clip(mu, -1, 1)
                 elif self.algo == 'ddpg':
                     action = self.model.forward(ob, mode='act')

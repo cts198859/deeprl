@@ -2,6 +2,7 @@ import os
 from agents.utils import *
 from agents.a2c_policies import *
 from agents.ddpg_policies import *
+from agents.ppo_policies import *
 
 
 class A2C:
@@ -70,11 +71,11 @@ class A2C:
         n_fc = model_config.get('NUM_FC').split(',')
         n_fc = [int(x) for x in n_fc]
         self.n_step = n_step
-        if policy == 'lstm':
+        if policy_name == 'lstm':
             n_lstm = model_config.getint('NUM_LSTM')
             self.policy = A2CLstmPolicy(n_s, n_a, n_step, self.i_thread, n_past, n_fc=n_fc,
                                         n_lstm=n_lstm, discrete=discrete)
-        elif policy == 'cnn1':
+        elif policy_name == 'cnn1':
             n_filter = model_config.getint('NUM_FILTER')
             m_filter = model_config.getint('SIZE_FILTER')
             self.policy = A2CCnn1DPolicy(n_s, n_a, n_step, self.i_thread, n_past,
@@ -126,7 +127,6 @@ class PPO(A2C):
                 self.clip_scheduler = self._init_scheduler(model_config, name='CLIP')
             self._init_train(optimizer, lr, clip, model_config)
 
-
     def backward(self, R, cur_lr, cur_beta, cur_clip):
         obs, acts, dones, Rs, Advs, Vs, Logprobs = self.trans_buffer.sample_transition(R, self.discrete)
         return self.policy.backward(self.sess, obs, acts, dones, Rs, Advs, Vs, Logprobs,
@@ -147,18 +147,18 @@ class PPO(A2C):
         n_fc = model_config.get('NUM_FC').split(',')
         n_fc = [int(x) for x in n_fc]
         self.n_step = n_step
-        if policy == 'lstm':
+        if policy_name == 'lstm':
             n_lstm = model_config.getint('NUM_LSTM')
-            self.policy = A2CLstmPolicy(n_s, n_a, n_step, self.i_thread, n_past, n_fc=n_fc,
+            self.policy = PPOLstmPolicy(n_s, n_a, n_step, self.i_thread, n_past, n_fc=n_fc,
                                         n_lstm=n_lstm, discrete=discrete)
-        elif policy == 'cnn1':
+        elif policy_name == 'cnn1':
             n_filter = model_config.getint('NUM_FILTER')
             m_filter = model_config.getint('SIZE_FILTER')
-            self.policy = A2CCnn1DPolicy(n_s, n_a, n_step, self.i_thread, n_past,
+            self.policy = PPOCnn1DPolicy(n_s, n_a, n_step, self.i_thread, n_past,
                                          n_fc=n_fc, n_filter=n_filter,
                                          m_filter=m_filter, discrete=discrete)
 
-     def _init_train(self, optimizer, lr, clip, model_config):
+    def _init_train(self, optimizer, lr, clip, model_config):
         v_coef = model_config.getfloat('VALUE_COEF')
         max_grad_norm = model_config.getfloat('MAX_GRAD_NORM')
         alpha = model_config.getfloat('RMSP_ALPHA')
@@ -170,6 +170,7 @@ class PPO(A2C):
             self.optimizer = self.policy.optimizer
             self.lr = self.policy.lr
             self.clip = self.policy.clip
+
 
 class DDPG(A2C):
     def __init__(self, sess, n_s, n_a, total_step, model_config=None, i_thread=-1):
@@ -183,7 +184,6 @@ class DDPG(A2C):
         self.n_warmup = model_config.getfloat('WARMUP_STEP')
         self.n_step = model_config.getint('NUM_STEP')
         self._init_policy(n_s, n_a, model_config)
-        
         if total_step > 0:
             self.lr_scheduler = self._init_scheduler(model_config)
             self._init_train(model_config)

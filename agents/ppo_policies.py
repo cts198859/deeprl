@@ -4,7 +4,7 @@ from agents.utils import *
 from agents.a2c_policies import A2CPolicy
 import bisect
 
-def PPOPolicy(A2CPolicy):
+class PPOPolicy(A2CPolicy):
     def __init__(self, n_a, n_s, n_step, n_past, discrete):
         super().__init__(n_a, n_s, n_step, n_past, discrete)
 
@@ -17,10 +17,6 @@ def PPOPolicy(A2CPolicy):
         else:
             self.lr = lr
             self.clip = clip
-        if not self.discrete:
-            self.A = tf.placeholder(tf.float32, [self.n_step, self.n_a])
-        else:
-            self.A = tf.placeholder(tf.int32, [self.n_step])
         self.ADV = tf.placeholder(tf.float32, [self.n_step])
         self.R = tf.placeholder(tf.float32, [self.n_step])
         self.entropy_coef = tf.placeholder(tf.float32, [])
@@ -53,29 +49,31 @@ def PPOPolicy(A2CPolicy):
     def _get_forward_outs(self, out_type):
         outs = []
         if 'p' in out_type:
+            outs.append(self.a)
             if self.discrete:
                 outs.append(self.pi)
             else:
                 outs += self.pi
         if 'v' in out_type:
             outs.append(self.v)
+        if ('p' in out_type) and ('v' in out_type):
             outs.append(self.logprob)
         return outs
 
-    def _get_logprob(self, pi):
+    def _get_logprob(self, pi, A):
         if self.discrete:
-            A_sparse = tf.one_hot(self.A, self.n_a)
+            A_sparse = tf.one_hot(A, self.n_a)
             log_pi = tf.log(tf.clip_by_value(pi, 1e-10, 1.0))
             log_prob = tf.reduce_sum(log_pi * A_sparse, axis=1)
             entropy = -tf.reduce_sum(pi * log_pi, axis=1)
         else:
             a_norm_dist = tf.contrib.distributions.Normal(pi[0], pi[1])
-            log_prob = a_norm_dist.log_prob(tf.squeeze(self.A, axis=1))
+            log_prob = a_norm_dist.log_prob(tf.squeeze(A, axis=1))
             entropy = a_norm_dist.entropy()
         return log_prob, entropy
 
     def _policy_loss(self):
-        logprob, entropy = self._get_logprob(self.pi)
+        logprob, entropy = self._get_logprob(self.pi, self.A)
         entropy_loss = -tf.reduce_mean(entropy) * self.entropy_coef
         ratio = tf.exp(logprob - self.OLDLOGPROB)
         ratio_clip = tf.clip_by_value(ratio, 1 - self.clip, 1 + self.clip)
@@ -84,7 +82,7 @@ def PPOPolicy(A2CPolicy):
         self.clip_rate = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), self.clip)))
         return policy_loss, entropy_loss
 
-     def _value_loss(self):
+    def _value_loss(self):
         # This should be better than original PPO clipping
         v_clip = self.OLDV + tf.clip_by_value(self.v - self.OLDV, -self.clip * self.OLDV,
                                               self.clip * self.OLDV)
@@ -105,11 +103,16 @@ class PPOLstmPolicy(PPOPolicy):
         self.ob_bw = tf.placeholder(tf.float32, [n_step, n_s]) # backward n-step
         self.done_bw = tf.placeholder(tf.float32, [n_step])
         self.states = tf.placeholder(tf.float32, [2, n_lstm * 2])
+        if not self.discrete:
+            self.A = tf.placeholder(tf.float32, [n_step, n_a])
+        else:
+            self.A = tf.placeholder(tf.int32, [n_step])
         with tf.variable_scope(self.name):
             # pi and v use separate nets
             self.pi_fw, pi_state = self._build_net(n_fc, 'forward', 'pi')
             self.v_fw, v_state = self._build_net(n_fc, 'forward', 'v')
-            self.logprob_fw, _ = self._get_logprob(self.pi_fw)
+            self.a = self._sample_action(self.pi_fw)
+            self.logprob, _ = self._get_logprob(self.pi_fw, [self.a])
             pi_state = tf.expand_dims(pi_state, 0)
             v_state = tf.expand_dims(v_state, 0)
             self.new_states = tf.concat([pi_state, v_state], 0)
@@ -178,17 +181,19 @@ class PPOLstmPolicy(PPOPolicy):
     def _get_forward_outs(self, out_type):
         outs = []
         if 'p' in out_type:
+            outs.append(self.a)
             if self.discrete:
                 outs.append(self.pi_fw)
             else:
                 outs += self.pi_fw
         if 'v' in out_type:
             outs.append(self.v_fw)
-            outs.append(self.logprob_fw)
+        if ('p' in out_type) and ('v' in out_type):
+            outs.append(self.logprob)
         return outs
 
 
-class A2CCnn1DPolicy(A2CPolicy):
+class PPOCnn1DPolicy(PPOPolicy):
     def __init__(self, n_s, n_a, n_step, i_thread, n_past=10,
                  n_fc=[128], n_filter=64, m_filter=3, discrete=True):
         super().__init__(n_a, n_s, n_step, n_past, discrete)
@@ -196,11 +201,16 @@ class A2CCnn1DPolicy(A2CPolicy):
         self.n_filter = n_filter
         self.m_filter = m_filter
         self.obs = tf.placeholder(tf.float32, [None, n_past, n_s])
+        if not self.discrete:
+            self.A = tf.placeholder(tf.float32, [None, self.n_a])
+        else:
+            self.A = tf.placeholder(tf.int32, [None])
         with tf.variable_scope(self.name):
             # pi and v use separate nets 
             self.pi = self._build_net(n_fc, 'pi')
             self.v = self._build_net(n_fc, 'v')
-            self.logprob = self._get_logprob(self.pi)
+            self.a = self._sample_action(self.pi)
+            self.logprob, _ = self._get_logprob(self.pi, [self.a])
         self._reset()
 
     def _build_net(self, n_fc, out_type):
@@ -266,4 +276,3 @@ class A2CCnn1DPolicy(A2CPolicy):
                                 self.entropy_coef: cur_beta,
                                 self.clip: cur_clip})
         return summary_out[:-1]
-

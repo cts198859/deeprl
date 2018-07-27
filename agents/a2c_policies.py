@@ -32,6 +32,7 @@ class A2CPolicy:
     def _get_forward_outs(self, out_type):
         outs = []
         if 'p' in out_type:
+            outs.append(self.a)
             if self.discrete:
                 outs.append(self.pi)
             else:
@@ -95,6 +96,14 @@ class A2CPolicy:
             self.sync_wt = self._sync_wt(global_wts, wts)
         self.train_out = [entropy_loss, policy_loss, value_loss, self.loss, self.grad_norm]
 
+    def _sample_action(self, pi):
+        if self.discrete:
+            log_pi = tf.log(tf.clip_by_value(pi, 1e-10, 1.0))
+            return tf.cast(tf.squeeze(tf.multinomial(log_pi, 1)), tf.int32)
+        else:
+            a = pi[0] + pi[1] * tf.random_normal()
+            return tf.clip_by_value(a, -1, 1)
+
     @staticmethod
     def _sync_wt(global_wt, local_wt):
         sync_ops = []
@@ -119,6 +128,7 @@ class A2CLstmPolicy(A2CPolicy):
             # pi and v use separate nets
             self.pi_fw, pi_state = self._build_net(n_fc, 'forward', 'pi')
             self.v_fw, v_state = self._build_net(n_fc, 'forward', 'v')
+            self.a = self._sample_action(self.pi_fw)
             pi_state = tf.expand_dims(pi_state, 0)
             v_state = tf.expand_dims(v_state, 0)
             self.new_states = tf.concat([pi_state, v_state], 0)
@@ -200,6 +210,7 @@ class A2CLstmPolicy(A2CPolicy):
     def _get_forward_outs(self, out_type):
         outs = []
         if 'p' in out_type:
+            outs.append(self.a)
             if self.discrete:
                 outs.append(self.pi_fw)
             else:
@@ -221,6 +232,7 @@ class A2CCnn1DPolicy(A2CPolicy):
             # pi and v use separate nets 
             self.pi = self._build_net(n_fc, 'pi')
             self.v = self._build_net(n_fc, 'v')
+            self.a = self._sample_action(self.pi)
         if i_thread == -1:
             with tf.variable_scope(self.name, reuse=True):
                 summaries = []
