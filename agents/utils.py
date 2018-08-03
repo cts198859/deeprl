@@ -271,7 +271,6 @@ class PPOBuffer(OnPolicyBuffer):
         return obs, acts, dones, Rs, Advs, Vs, Logprobs
 
 
-
 class ReplayBuffer(ExpBuffer):
     def __init__(self, buffer_size, batch_size):
         self.buffer_size = buffer_size

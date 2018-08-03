@@ -128,9 +128,19 @@ class PPO(A2C):
             self._init_train(optimizer, lr, clip, model_config)
 
     def backward(self, R, cur_lr, cur_beta, cur_clip):
+        # TODO: add epoch and minibatch
         obs, acts, dones, Rs, Advs, Vs, Logprobs = self.trans_buffer.sample_transition(R, self.discrete)
-        return self.policy.backward(self.sess, obs, acts, dones, Rs, Advs, Vs, Logprobs,
-                                    cur_lr, cur_beta, cur_clip)
+        n_update = int(self.n_step / self.n_batch)
+        summary = []
+        for _ in range(self.n_epoch):
+            inds = np.random.permutation(self.n_step)
+            for i in range(n_update):
+                cur_inds = inds[(i * self.n_batch):((i + 1) * self.n_batch)]
+                val = self.policy.backward(self.sess, obs[cur_inds], acts[cur_inds], dones[cur_inds],
+                                           Rs[cur_inds], Advs[cur_inds], Vs[cur_inds], Logprobs[cur_inds],
+                                           cur_lr, cur_beta, cur_clip)
+                summary.append(val)
+        return list(np.mean(np.array(summary), axis=0))
 
     def forward(self, ob, done, mode='pv'):
         return self.policy.forward(self.sess, ob, done, mode)
@@ -147,14 +157,16 @@ class PPO(A2C):
         n_fc = model_config.get('NUM_FC').split(',')
         n_fc = [int(x) for x in n_fc]
         self.n_step = n_step
+        n_batch = model_config.getint('BATCH_SIZE')
+        self.n_batch = n_batch
         if policy_name == 'lstm':
             n_lstm = model_config.getint('NUM_LSTM')
-            self.policy = PPOLstmPolicy(n_s, n_a, n_step, self.i_thread, n_past, n_fc=n_fc,
+            self.policy = PPOLstmPolicy(n_s, n_a, n_batch, self.i_thread, n_past, n_fc=n_fc,
                                         n_lstm=n_lstm, discrete=discrete)
         elif policy_name == 'cnn1':
             n_filter = model_config.getint('NUM_FILTER')
             m_filter = model_config.getint('SIZE_FILTER')
-            self.policy = PPOCnn1DPolicy(n_s, n_a, n_step, self.i_thread, n_past,
+            self.policy = PPOCnn1DPolicy(n_s, n_a, n_batch, self.i_thread, n_past,
                                          n_fc=n_fc, n_filter=n_filter,
                                          m_filter=m_filter, discrete=discrete)
 
@@ -164,6 +176,7 @@ class PPO(A2C):
         alpha = model_config.getfloat('RMSP_ALPHA')
         epsilon = model_config.getfloat('RMSP_EPSILON')
         gamma = model_config.getfloat('GAMMA')
+        self.n_epoch = model_config.getint('NUM_EPOCH')
         self.policy.prepare_loss(optimizer, lr, v_coef, max_grad_norm, alpha, epsilon, clip)
         self.trans_buffer = PPOBuffer(gamma)
         if self.i_thread == -1:
@@ -201,10 +214,10 @@ class DDPG(A2C):
         else:
             warmup = False
         lr_actor, lr_critic = cur_lr, cur_lr * self.v_coef
-        obs, acts, next_obs, rs, dones = self.trans_buffer.sample_transition()
         # summary: loss_v, loss_p, loss, grad_norm_v, grad_norm_p
         summary = []
         for _ in range(self.n_update):
+            obs, acts, next_obs, rs, dones = self.trans_buffer.sample_transition()
             val = self.policy.backward(self.sess, obs, acts, next_obs, dones, rs,
                                        lr_critic, lr_actor, warmup=warmup)
             summary.append(val)
