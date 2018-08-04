@@ -112,7 +112,7 @@ class PPOLstmPolicy(PPOPolicy):
             self.pi_fw, pi_state = self._build_net(n_fc, 'forward', 'pi')
             self.v_fw, v_state = self._build_net(n_fc, 'forward', 'v')
             self.a = self._sample_action(self.pi_fw)
-            self.logprob, _ = self._get_logprob(self.pi_fw, [self.a])
+            self.logprob, _ = self._get_logprob(self.pi_fw, tf.expand_dims(self.a, 0))
             pi_state = tf.expand_dims(pi_state, 0)
             v_state = tf.expand_dims(v_state, 0)
             self.new_states = tf.concat([pi_state, v_state], 0)
@@ -210,7 +210,7 @@ class PPOCnn1DPolicy(PPOPolicy):
             self.pi = self._build_net(n_fc, 'pi')
             self.v = self._build_net(n_fc, 'v')
             self.a = self._sample_action(self.pi)
-            self.logprob, _ = self._get_logprob(self.pi, [self.a])
+            self.logprob, _ = self._get_logprob(self.pi, tf.expand_dims(self.a, 0))
         self._reset()
 
     def _build_net(self, n_fc, out_type):

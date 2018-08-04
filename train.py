@@ -99,7 +99,10 @@ class Trainer:
                     value = np.nan
             next_ob, reward, done, _ = self.env.step(action)
             # TODO: remove action?
-            cum_actions.append(action[0])
+            if self.env.discrete:
+                cum_actions.append(action)
+            else:
+                cum_actions.append(action[0])
             cum_reward += reward
             global_step = self.global_counter.next()
             self.cur_step += 1

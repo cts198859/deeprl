@@ -19,6 +19,8 @@ In config-path, the variable BASE DIR has the directory where results are presen
 To monitor progress on tensorboard, type `python -m tensorflow.tensorboard --logdir=.` which will launch tensorboard and you can monitor progress on a browser window. Some example plots are below.
 
 ## Example results
+### A2C performance on selected gym environments. Detailed config files are located under `./docs`.
+
 **continuous control**     | discrete control
 :-------------------------:|:--------------------------:
 Pendulum                   | Acrobot
@@ -27,7 +29,5 @@ MountainCarContinuous      | MountainCar
 ![](./docs/contcar.png)    | ![](./docs/car.png)
 
 
-
-detailed config files are located under `./docs`.
 
 

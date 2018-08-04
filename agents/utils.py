@@ -309,7 +309,7 @@ class ReplayBuffer(ExpBuffer):
 util functions
 """
 class Scheduler:
-    def __init__(self, val_init, val_min, total_step, decay='linear'):
+    def __init__(self, val_init, val_min=0, total_step=0, decay='linear'):
         self.val = val_init
         self.N = float(total_step)
         self.val_min = val_min

@@ -83,18 +83,18 @@ class A2C:
                                          m_filter=m_filter, discrete=discrete)
 
     def _init_scheduler(self, model_config, name='LR'):
-        var_init = model_config.getfloat(name + '_INIT')
-        var_decay = model_config.get(name + '_DECAY')
-        if var_decay == 'constant':
-            return Scheduler(var_init, decay=var_decay)
+        val_init = model_config.getfloat(name + '_INIT')
+        val_decay = model_config.get(name + '_DECAY')
+        if val_decay == 'constant':
+            return Scheduler(val_init, decay=val_decay)
         if name + '_MIN' in model_config:
-            var_min = model_config.getfloat(name + '_MIN')
+            val_min = model_config.getfloat(name + '_MIN')
         else:
-            var_min = 0
+            val_min = 0
         decay_step = self.total_step
         if name + '_RATIO' in model_config:
             decay_step *= model_config.getfloat(name + '_RATIO')
-        return Scheduler(var_init, var_min, decay_step, decay=var_decay)
+        return Scheduler(val_init, val_min=val_min, total_step=decay_step, decay=val_decay)
 
     def _init_train(self, optimizer, lr, model_config):
         v_coef = model_config.getfloat('VALUE_COEF')
