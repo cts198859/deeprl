@@ -1,33 +1,50 @@
 import numpy as np
 import tensorflow as tf
 from agents.utils import *
+from agents.a2c_policies import A2CPolicy
 import bisect
 
-
-class A2CPolicy:
+class PPOPolicy(A2CPolicy):
     def __init__(self, n_a, n_s, n_step, n_past, discrete):
-        self.n_a = n_a
-        self.n_s = n_s
-        self.n_step = n_step
-        self.n_past = n_past
-        self.discrete = discrete
+        super().__init__(n_a, n_s, n_step, n_past, discrete)
 
-    def _build_fc_net(self, h, n_fc, out_type):
-        for i, n_fc_cur in enumerate(n_fc):
-            fc_cur = out_type + '_fc%d' % i
-            h = fc(h, fc_cur, n_fc_cur)
-        if out_type == 'pi':
-            if self.discrete:
-                pi = fc(h, out_type, self.n_a, act=tf.nn.softmax)
-                return tf.squeeze(pi)
-            else:
-                mu = fc(h, 'mu', self.n_a, act=tf.nn.tanh)
-                std = fc(h, 'std', self.n_a, act=tf.nn.tanh) + 1
-                # need 1e-3 to avoid log_prob explosion
-                return [tf.squeeze(mu),  tf.squeeze(std) + 1e-3]
+    def prepare_loss(self, optimizer, lr, v_coef, max_grad_norm, alpha, epsilon,
+                     clip):
+        if optimizer is None:
+            # global policy
+            self.lr = tf.placeholder(tf.float32, [])
+            self.clip = tf.placeholder(tf.float32, [])
         else:
-            v = fc(h, out_type, 1, act=lambda x: x)
-            return tf.squeeze(v)
+            self.lr = lr
+            self.clip = clip
+        self.ADV = tf.placeholder(tf.float32, [self.n_step])
+        self.R = tf.placeholder(tf.float32, [self.n_step])
+        self.entropy_coef = tf.placeholder(tf.float32, [])
+        # old v and pi values for clipping
+        self.OLDV = tf.placeholder(tf.float32, [self.n_step])
+        self.OLDLOGPROB = tf.placeholder(tf.float32, [self.n_step])
+        policy_loss, entropy_loss = self._policy_loss()
+        value_loss = self._value_loss() * v_coef
+        self.loss = policy_loss + value_loss + entropy_loss
+
+        wts = tf.trainable_variables(scope=self.name)
+        grads = tf.gradients(self.loss, wts)
+        if max_grad_norm > 0:
+            grads, self.grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
+        if optimizer is None:
+            # global policy
+            self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr, decay=alpha,
+                                                       epsilon=epsilon)
+            self._train = self.optimizer.apply_gradients(list(zip(grads, wts)))
+        else:
+            # local policy
+            self.optimizer = None
+            global_name = self.name.split('_')[0] + '_' + str(-1)
+            global_wts = tf.trainable_variables(scope=global_name)
+            self._train = optimizer.apply_gradients(list(zip(grads, global_wts)))
+            self.sync_wt = self._sync_wt(global_wts, wts)
+        self.train_out = [entropy_loss, policy_loss, value_loss, self.loss, self.grad_norm,
+                          self.policy_kl, self.clip_rate]
 
     def _get_forward_outs(self, out_type):
         outs = []
@@ -39,87 +56,46 @@ class A2CPolicy:
                 outs += self.pi
         if 'v' in out_type:
             outs.append(self.v)
+        if ('p' in out_type) and ('v' in out_type):
+            outs.append(self.logprob)
         return outs
 
-    def _return_forward_outs(self, out_values):
-        if len(out_values) == 1:
-            return out_values[0]
-        return out_values
-
-    def _discrete_policy_loss(self):
-        A_sparse = tf.one_hot(self.A, self.n_a)
-        log_pi = tf.log(tf.clip_by_value(self.pi, 1e-10, 1.0))
-        entropy = -tf.reduce_sum(self.pi * log_pi, axis=1)
-        entropy_loss = -tf.reduce_mean(entropy) * self.entropy_coef
-        policy_loss = -tf.reduce_mean(tf.reduce_sum(log_pi * A_sparse, axis=1) * self.ADV)
-        return policy_loss, entropy_loss
-
-    def _continuous_policy_loss(self):
-        a_norm_dist = tf.contrib.distributions.Normal(self.pi[0], self.pi[1])
-        log_prob = a_norm_dist.log_prob(tf.squeeze(self.A, axis=1))
-        entropy_loss = -tf.reduce_mean(a_norm_dist.entropy()) * self.entropy_coef
-        policy_loss = -tf.reduce_mean(log_prob * self.ADV)
-        return policy_loss, entropy_loss
-
-    def prepare_loss(self, optimizer, lr, v_coef, max_grad_norm, alpha, epsilon):
-        if not self.discrete:
-            self.A = tf.placeholder(tf.float32, [self.n_step, self.n_a])
-        else:
-            self.A = tf.placeholder(tf.int32, [self.n_step])
-        self.ADV = tf.placeholder(tf.float32, [self.n_step])
-        self.R = tf.placeholder(tf.float32, [self.n_step])
-        self.entropy_coef = tf.placeholder(tf.float32, [])
+    def _get_logprob(self, pi, A):
         if self.discrete:
-            policy_loss, entropy_loss = self._discrete_policy_loss()
-        else:
-            policy_loss, entropy_loss = self._continuous_policy_loss()
-        value_loss = tf.reduce_mean(tf.square(self.R - self.v)) * 0.5 * v_coef
-        self.loss = policy_loss + value_loss + entropy_loss
-
-        wts = tf.trainable_variables(scope=self.name)
-        grads = tf.gradients(self.loss, wts)
-        if max_grad_norm > 0:
-            grads, self.grad_norm = tf.clip_by_global_norm(grads, max_grad_norm)
-        if optimizer is None:
-            # global policy
-            self.lr = tf.placeholder(tf.float32, [])
-            self.optimizer = tf.train.RMSPropOptimizer(learning_rate=self.lr, decay=alpha,
-                                                       epsilon=epsilon)
-            self._train = self.optimizer.apply_gradients(list(zip(grads, wts)))
-        else:
-            # local policy
-            self.lr = lr
-            self.optimizer = None
-            global_name = self.name.split('_')[0] + '_' + str(-1)
-            global_wts = tf.trainable_variables(scope=global_name)
-            self._train = optimizer.apply_gradients(list(zip(grads, global_wts)))
-            self.sync_wt = self._sync_wt(global_wts, wts)
-        self.train_out = [entropy_loss, policy_loss, value_loss, self.loss, self.grad_norm]
-
-    def _sample_action(self, pi):
-        if self.discrete:
+            A_sparse = tf.one_hot(A, self.n_a)
             log_pi = tf.log(tf.clip_by_value(pi, 1e-10, 1.0))
-            return tf.cast(tf.squeeze(tf.multinomial([log_pi], 1)), tf.int32)
+            log_prob = tf.reduce_sum(log_pi * A_sparse, axis=1)
+            entropy = -tf.reduce_sum(pi * log_pi, axis=1)
         else:
-            a = pi[0] + pi[1] * tf.random_normal(tf.shape(pi[0]))
-            a_clip = tf.clip_by_value(a, -1, 1)
-            if self.n_a > 1:
-                return a_clip
-            return [a_clip]
+            a_norm_dist = tf.contrib.distributions.Normal(pi[0], pi[1])
+            log_prob = a_norm_dist.log_prob(tf.squeeze(A, axis=1))
+            entropy = a_norm_dist.entropy()
+        return tf.squeeze(log_prob), entropy
 
-    @staticmethod
-    def _sync_wt(global_wt, local_wt):
-        sync_ops = []
-        for w1, w2 in zip(global_wt, local_wt):
-            sync_ops.append(w2.assign(w1))
-        return tf.group(*sync_ops)
+    def _policy_loss(self):
+        logprob, entropy = self._get_logprob(self.pi, self.A)
+        entropy_loss = -tf.reduce_mean(entropy) * self.entropy_coef
+        ratio = tf.exp(logprob - self.OLDLOGPROB)
+        ratio_clip = tf.clip_by_value(ratio, 1 - self.clip, 1 + self.clip)
+        policy_loss = -tf.reduce_mean(tf.maximum(ratio, ratio_clip) * self.ADV)
+        self.policy_kl = .5 * tf.reduce_mean(tf.square(logprob - self.OLDLOGPROB))
+        self.clip_rate = tf.reduce_mean(tf.to_float(tf.greater(tf.abs(ratio - 1.0), self.clip)))
+        return policy_loss, entropy_loss
+
+    def _value_loss(self):
+        # TODO: better usage on v_old
+        # v_clip = self.OLDV + tf.clip_by_value(self.v - self.OLDV, -self.clip * self.OLDV,
+        #                                       self.clip * self.OLDV)
+        v_loss = tf.square(self.R - self.v)
+        # v_loss_clip = tf.square(self.R - v_clip)
+        return tf.reduce_mean(v_loss) * 0.5
 
 
-class A2CLstmPolicy(A2CPolicy):
+class PPOLstmPolicy(PPOPolicy):
     def __init__(self, n_s, n_a, n_step, i_thread, n_past=-1,
                  n_fc=[128], n_lstm=64, discrete=True):
         super().__init__(n_a, n_s, n_step, n_past, discrete)
-        self.name = 'a2clstm_' + str(i_thread)
+        self.name = 'ppolstm_' + str(i_thread)
         self.n_lstm = n_lstm
         self.n_fc = n_fc
         self.ob_fw = tf.placeholder(tf.float32, [1, n_s]) # forward 1-step
@@ -127,28 +103,22 @@ class A2CLstmPolicy(A2CPolicy):
         self.ob_bw = tf.placeholder(tf.float32, [n_step, n_s]) # backward n-step
         self.done_bw = tf.placeholder(tf.float32, [n_step])
         self.states = tf.placeholder(tf.float32, [2, n_lstm * 2])
+        if not self.discrete:
+            self.A = tf.placeholder(tf.float32, [n_step, n_a])
+        else:
+            self.A = tf.placeholder(tf.int32, [n_step])
         with tf.variable_scope(self.name):
             # pi and v use separate nets
             self.pi_fw, pi_state = self._build_net(n_fc, 'forward', 'pi')
             self.v_fw, v_state = self._build_net(n_fc, 'forward', 'v')
             self.a = self._sample_action(self.pi_fw)
+            self.logprob, _ = self._get_logprob(self.pi_fw, tf.expand_dims(self.a, 0))
             pi_state = tf.expand_dims(pi_state, 0)
             v_state = tf.expand_dims(v_state, 0)
             self.new_states = tf.concat([pi_state, v_state], 0)
         with tf.variable_scope(self.name, reuse=True):
             self.pi, _ = self._build_net(n_fc, 'backward', 'pi')
             self.v, _ = self._build_net(n_fc, 'backward', 'v')
-            if i_thread == -1:
-                summaries = []
-                lstm_pi_w = tf.get_variable('pi_lstm/wx')
-                lstm_v_w = tf.get_variable('v_lstm/wx')
-                fc_pi_w = tf.get_variable('pi_fc0/w')
-                fc_v_w = tf.get_variable('v_fc0/w')
-                summaries.append(tf.summary.histogram('wt/lstm_pi', tf.reshape(lstm_pi_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/lstm_v', tf.reshape(lstm_v_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/fc_pi', tf.reshape(fc_pi_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/fc_v', tf.reshape(fc_v_w, [-1])))
-                self.summary = tf.summary.merge(summaries)
         self._reset()
 
     def _build_net(self, n_fc, in_type, out_type):
@@ -191,7 +161,8 @@ class A2CLstmPolicy(A2CPolicy):
             self.cur_step = 0
         return self._return_forward_outs(out_values)
 
-    def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta):
+    def backward(self, sess, obs, acts, dones, Rs, Advs, Vs, Logprobs,
+                 cur_lr, cur_beta, cur_clip):
         summary_out = sess.run(self.train_out + [self._train],
                                {self.ob_bw: obs,
                                 self.done_bw: dones,
@@ -199,16 +170,13 @@ class A2CLstmPolicy(A2CPolicy):
                                 self.A: acts,
                                 self.ADV: Advs,
                                 self.R: Rs,
+                                self.OLDV: Vs,
+                                self.OLDLOGPROB: Logprobs,
                                 self.lr: cur_lr,
-                                self.entropy_coef: cur_beta})
+                                self.entropy_coef: cur_beta,
+                                self.clip: cur_clip})
         self.states_bw = np.copy(self.states_fw)
         return summary_out[:-1]
-
-    def _backward_policy(self, sess, obs, dones):
-        pi = sess.run(self.pi, {self.ob_bw: obs, self.done_bw: dones,
-                                self.states: self.states_bw})
-        self.states_bw = np.copy(self.states_fw)
-        return pi
 
     def _get_forward_outs(self, out_type):
         outs = []
@@ -220,34 +188,29 @@ class A2CLstmPolicy(A2CPolicy):
                 outs += self.pi_fw
         if 'v' in out_type:
             outs.append(self.v_fw)
+        if ('p' in out_type) and ('v' in out_type):
+            outs.append(self.logprob)
         return outs
 
 
-class A2CCnn1DPolicy(A2CPolicy):
+class PPOCnn1DPolicy(PPOPolicy):
     def __init__(self, n_s, n_a, n_step, i_thread, n_past=10,
                  n_fc=[128], n_filter=64, m_filter=3, discrete=True):
         super().__init__(n_a, n_s, n_step, n_past, discrete)
-        self.name = 'a2ccnn1d_' + str(i_thread)
+        self.name = 'ppocnn1d_' + str(i_thread)
         self.n_filter = n_filter
         self.m_filter = m_filter
         self.obs = tf.placeholder(tf.float32, [None, n_past, n_s])
+        if not self.discrete:
+            self.A = tf.placeholder(tf.float32, [None, n_a])
+        else:
+            self.A = tf.placeholder(tf.int32, [None])
         with tf.variable_scope(self.name):
-            # pi and v use separate nets 
+            # pi and v use separate nets
             self.pi = self._build_net(n_fc, 'pi')
             self.v = self._build_net(n_fc, 'v')
             self.a = self._sample_action(self.pi)
-        if i_thread == -1:
-            with tf.variable_scope(self.name, reuse=True):
-                summaries = []
-                conv1_pi_w = tf.get_variable('pi_conv1/w')
-                conv1_v_w = tf.get_variable('v_conv1/w')
-                fc_pi_w = tf.get_variable('pi_fc0/w')
-                fc_v_w = tf.get_variable('v_fc0/w')
-                summaries.append(tf.summary.histogram('wt/conv1_pi', tf.reshape(conv1_pi_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/conv1_v', tf.reshape(conv1_v_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/fc_pi', tf.reshape(fc_pi_w, [-1])))
-                summaries.append(tf.summary.histogram('wt/fc_v', tf.reshape(fc_v_w, [-1])))
-                self.summary = tf.summary.merge(summaries)
+            self.logprob, _ = self._get_logprob(self.pi, tf.expand_dims(self.a, 0))
         self._reset()
 
     def _build_net(self, n_fc, out_type):
@@ -299,59 +262,17 @@ class A2CCnn1DPolicy(A2CPolicy):
         out_values = sess.run(outs, {self.obs: ob})
         return self._return_forward_outs(out_values)
 
-    def backward(self, sess, obs, acts, dones, Rs, Advs, cur_lr, cur_beta):
+    def backward(self, sess, obs, acts, dones, Rs, Advs, Vs, Logprobs,
+                 cur_lr, cur_beta, cur_clip):
         obs = self._recent_ob(np.array(obs), np.array(dones),  ob_type='backward')
         summary_out = sess.run(self.train_out + [self._train],
                                {self.obs: obs,
                                 self.A: acts,
                                 self.ADV: Advs,
                                 self.R: Rs,
+                                self.OLDV: Vs,
+                                self.OLDLOGPROB: Logprobs,
                                 self.lr: cur_lr,
-                                self.entropy_coef: cur_beta})
+                                self.entropy_coef: cur_beta,
+                                self.clip: cur_clip})
         return summary_out[:-1]
-
-    def _backward_policy(self, sess, obs, dones):
-        obs = self._recent_ob(np.array(obs), np.array(dones),  ob_type='backward')
-        print(obs)
-        return sess.run(self.pi, {self.obs: obs})
-
-
-def test_forward_backward_policies(sess, policy, x, done):
-    n_step = len(done)
-    for i in range(n_step):
-        print('forward')
-        pi = policy.forward(sess, x[i], done[i], out_type='p')
-        print(pi)
-        print('-' * 40)
-    print('backward')
-    pi = policy._backward_policy(sess, x, done)
-    print(pi)
-    print('=' * 40)
-
-
-def test_policies():
-    sess = tf.Session()
-    n_s, n_a, n_step, n_past = 3, 2, 5, 8
-    p_lstm = A2CLstmPolicy(n_s, n_a, n_step, n_lstm=5)
-    p_cnn1 = A2CCnn1DPolicy(n_s, n_a, n_step, n_past)
-    sess.run(tf.global_variables_initializer())
-    print('=' * 16 + 'first batch' + '=' * 16)
-    x = np.random.randn(n_step, n_s)
-    done = np.array([0,0,0,1,0])
-    x[3,:] = 0
-    print('LSTM:')
-    test_forward_backward_policies(sess, p_lstm, x, done)
-    print('CNN1D:')
-    test_forward_backward_policies(sess, p_cnn1, x, done)
-    print('=' * 16 + 'second batch' + '=' * 16)
-    x = np.random.randn(n_step, n_s)
-    done = np.array([0,1,1,0,0])
-    x[1,:] = 0
-    print('LSTM:')
-    test_forward_backward_policies(sess, p_lstm, x, done)
-    print('CNN1D:')
-    test_forward_backward_policies(sess, p_cnn1, x, done)
-
-
-if __name__ == '__main__':
-    test_policies()

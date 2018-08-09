@@ -1,7 +1,6 @@
 import numpy as np
 import tensorflow as tf
 from agents.utils import *
-import bisect
 
 
 class DDPGPolicy:

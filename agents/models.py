@@ -2,56 +2,25 @@ import os
 from agents.utils import *
 from agents.a2c_policies import *
 from agents.ddpg_policies import *
+from agents.ppo_policies import *
 
 
 class A2C:
-    #TODO: clean up A2C format
     def __init__(self, sess, n_s, n_a, total_step, i_thread=-1, optimizer=None, lr=None,
                  model_config=None, discrete=True):
-        self.sess = sess
-        policy = model_config.get('POLICY')
-        v_coef = model_config.getfloat('VALUE_COEF')
-        max_grad_norm = model_config.getfloat('MAX_GRAD_NORM')
-        alpha = model_config.getfloat('RMSP_ALPHA')
-        epsilon = model_config.getfloat('RMSP_EPSILON')
-        lr_init = model_config.getfloat('LR_INIT')
-        lr_min = model_config.getfloat('LR_MIN')
-        lr_decay = model_config.get('LR_DECAY')
-        beta_init = model_config.getfloat('ENTROPY_COEF_INIT')
-        beta_min = model_config.getfloat('ENTROPY_COEF_MIN')
-        beta_decay = model_config.get('ENTROPY_DECAY')
-        beta_ratio = model_config.getfloat('ENTROPY_RATIO')
-        gamma = model_config.getfloat('GAMMA')
-        self.reward_norm = model_config.getfloat('REWARD_NORM')
-        n_step = model_config.getint('NUM_STEP')
-        n_past = model_config.getint('NUM_PAST')
-        n_fc = model_config.get('NUM_FC').split(',')
-        n_fc = [int(x) for x in n_fc]
-
-        if policy == 'lstm':
-            n_lstm = model_config.getint('NUM_LSTM')
-            self.policy = A2CLstmPolicy(n_s, n_a, n_step, i_thread, n_past, n_fc=n_fc,
-                                        n_lstm=n_lstm, discrete=discrete)
-        elif policy == 'cnn1':
-            n_filter = model_config.getint('NUM_FILTER')
-            m_filter = model_config.getint('SIZE_FILTER')
-            self.policy = A2CCnn1DPolicy(n_s, n_a, n_step, i_thread, n_past,
-                                         n_fc=n_fc, n_filter=n_filter,
-                                         m_filter=m_filter, discrete=discrete)
         self.name = 'a2c'
-        self.policy.prepare_loss(optimizer, lr, v_coef, max_grad_norm, alpha, epsilon)
-
-        if (i_thread == -1) and (total_step > 0):
-            # global lr and entropy beta scheduler
-            self.lr_scheduler = Scheduler(lr_init, lr_min, total_step, decay=lr_decay)
-            self.beta_scheduler = Scheduler(beta_init, beta_min, total_step * beta_ratio,
-                                            decay=beta_decay)
-        self.trans_buffer = OnPolicyBuffer(gamma)
-        self.n_step = n_step
-        self.optimizer = self.policy.optimizer
-        self.lr = self.policy.lr
-        self.discrete = discrete
+        self.sess = sess
         self.i_thread = i_thread
+        self.total_step = total_step
+        self._init_policy(n_s, n_a, model_config, discrete)
+        self.reward_norm = model_config.getfloat('REWARD_NORM')
+        self.discrete = discrete
+        if total_step > 0:
+            # global lr and entropy beta scheduler
+            if i_thread == -1:
+                self.lr_scheduler = self._init_scheduler(model_config)
+                self.beta_scheduler = self._init_scheduler(model_config, name='ENTROPY')
+            self._init_train(optimizer, lr, model_config)
 
     def init_train(self):
         pass
@@ -95,21 +64,142 @@ class A2C:
             reward /= self.reward_norm
         self.trans_buffer.add_transition(ob, action, reward, value, done)
 
+    def _init_policy(self, n_s, n_a, model_config, discrete):
+        policy_name = model_config.get('POLICY')
+        n_step = model_config.getint('NUM_STEP')
+        n_past = model_config.getint('NUM_PAST')
+        n_fc = model_config.get('NUM_FC').split(',')
+        n_fc = [int(x) for x in n_fc]
+        self.n_step = n_step
+        if policy_name == 'lstm':
+            n_lstm = model_config.getint('NUM_LSTM')
+            self.policy = A2CLstmPolicy(n_s, n_a, n_step, self.i_thread, n_past, n_fc=n_fc,
+                                        n_lstm=n_lstm, discrete=discrete)
+        elif policy_name == 'cnn1':
+            n_filter = model_config.getint('NUM_FILTER')
+            m_filter = model_config.getint('SIZE_FILTER')
+            self.policy = A2CCnn1DPolicy(n_s, n_a, n_step, self.i_thread, n_past,
+                                         n_fc=n_fc, n_filter=n_filter,
+                                         m_filter=m_filter, discrete=discrete)
+
+    def _init_scheduler(self, model_config, name='LR'):
+        val_init = model_config.getfloat(name + '_INIT')
+        val_decay = model_config.get(name + '_DECAY')
+        if val_decay == 'constant':
+            return Scheduler(val_init, decay=val_decay)
+        if name + '_MIN' in model_config:
+            val_min = model_config.getfloat(name + '_MIN')
+        else:
+            val_min = 0
+        decay_step = self.total_step
+        if name + '_RATIO' in model_config:
+            decay_step *= model_config.getfloat(name + '_RATIO')
+        return Scheduler(val_init, val_min=val_min, total_step=decay_step, decay=val_decay)
+
+    def _init_train(self, optimizer, lr, model_config):
+        v_coef = model_config.getfloat('VALUE_COEF')
+        max_grad_norm = model_config.getfloat('MAX_GRAD_NORM')
+        alpha = model_config.getfloat('RMSP_ALPHA')
+        epsilon = model_config.getfloat('RMSP_EPSILON')
+        gamma = model_config.getfloat('GAMMA')
+        self.policy.prepare_loss(optimizer, lr, v_coef, max_grad_norm, alpha, epsilon)
+        self.trans_buffer = OnPolicyBuffer(gamma)
+        if self.i_thread == -1:
+            self.optimizer = self.policy.optimizer
+            self.lr = self.policy.lr
+
+
+class PPO(A2C):
+    def __init__(self, sess, n_s, n_a, total_step, i_thread=-1, optimizer=None, lr=None,
+                 clip=None, model_config=None, discrete=True):
+        self.name = 'ppo'
+        self.sess = sess
+        self.i_thread = i_thread
+        self.total_step = total_step
+        self._init_policy(n_s, n_a, model_config, discrete)
+        self.reward_norm = model_config.getfloat('REWARD_NORM')
+        self.discrete = discrete
+        if total_step > 0:
+            # global lr and entropy beta scheduler
+            if i_thread == -1:
+                self.lr_scheduler = self._init_scheduler(model_config)
+                self.beta_scheduler = self._init_scheduler(model_config, name='ENTROPY')
+                self.clip_scheduler = self._init_scheduler(model_config, name='CLIP')
+            self._init_train(optimizer, lr, clip, model_config)
+
+    def backward(self, R, cur_lr, cur_beta, cur_clip):
+        # TODO: add epoch and minibatch
+        obs, acts, dones, Rs, Advs, Vs, Logprobs = self.trans_buffer.sample_transition(R, self.discrete)
+        n_update = int(self.n_step / self.n_batch)
+        summary = []
+        for _ in range(self.n_epoch):
+            inds = np.random.permutation(self.n_step)
+            for i in range(n_update):
+                cur_inds = inds[(i * self.n_batch):((i + 1) * self.n_batch)]
+                val = self.policy.backward(self.sess, obs[cur_inds], acts[cur_inds], dones[cur_inds],
+                                           Rs[cur_inds], Advs[cur_inds], Vs[cur_inds], Logprobs[cur_inds],
+                                           cur_lr, cur_beta, cur_clip)
+                summary.append(val)
+        return list(np.mean(np.array(summary), axis=0))
+
+    def forward(self, ob, done, mode='pv'):
+        return self.policy.forward(self.sess, ob, done, mode)
+
+    def add_transition(self, ob, action, reward, value, done, logprob):
+        if self.reward_norm:
+            reward /= self.reward_norm
+        self.trans_buffer.add_transition(ob, action, reward, value, done, logprob)
+
+    def _init_policy(self, n_s, n_a, model_config, discrete):
+        policy_name = model_config.get('POLICY')
+        n_step = model_config.getint('NUM_STEP')
+        n_past = model_config.getint('NUM_PAST')
+        n_fc = model_config.get('NUM_FC').split(',')
+        n_fc = [int(x) for x in n_fc]
+        self.n_step = n_step
+        n_batch = model_config.getint('BATCH_SIZE')
+        self.n_batch = n_batch
+        if policy_name == 'lstm':
+            n_lstm = model_config.getint('NUM_LSTM')
+            self.policy = PPOLstmPolicy(n_s, n_a, n_batch, self.i_thread, n_past, n_fc=n_fc,
+                                        n_lstm=n_lstm, discrete=discrete)
+        elif policy_name == 'cnn1':
+            n_filter = model_config.getint('NUM_FILTER')
+            m_filter = model_config.getint('SIZE_FILTER')
+            self.policy = PPOCnn1DPolicy(n_s, n_a, n_batch, self.i_thread, n_past,
+                                         n_fc=n_fc, n_filter=n_filter,
+                                         m_filter=m_filter, discrete=discrete)
+
+    def _init_train(self, optimizer, lr, clip, model_config):
+        v_coef = model_config.getfloat('VALUE_COEF')
+        max_grad_norm = model_config.getfloat('MAX_GRAD_NORM')
+        alpha = model_config.getfloat('RMSP_ALPHA')
+        epsilon = model_config.getfloat('RMSP_EPSILON')
+        gamma = model_config.getfloat('GAMMA')
+        self.n_epoch = model_config.getint('NUM_EPOCH')
+        self.policy.prepare_loss(optimizer, lr, v_coef, max_grad_norm, alpha, epsilon, clip)
+        self.trans_buffer = PPOBuffer(gamma)
+        if self.i_thread == -1:
+            self.optimizer = self.policy.optimizer
+            self.lr = self.policy.lr
+            self.clip = self.policy.clip
+
 
 class DDPG(A2C):
     def __init__(self, sess, n_s, n_a, total_step, model_config=None, i_thread=-1):
         self.name = 'ddpg'
+        self.sess = sess
+        self.i_thread = i_thread
+        self.total_step = total_step
         self.reward_norm = model_config.getfloat('REWARD_NORM')
         self.v_coef = model_config.getfloat('VALUE_COEF')
         self.n_update = model_config.getint('NUM_UPDATE')
         self.n_warmup = model_config.getfloat('WARMUP_STEP')
         self.n_step = model_config.getint('NUM_STEP')
         self._init_policy(n_s, n_a, model_config)
-        self.sess = sess
-        self.total_step = total_step
-        self.i_thread = i_thread
-        if self.total_step > 0:
-            self._init_scheduler(model_config)
+        self.n_a = n_a
+        if total_step > 0:
+            self.lr_scheduler = self._init_scheduler(model_config)
             self._init_train(model_config)
 
     def add_transition(self, ob, action, reward, next_ob, done):
@@ -125,16 +215,19 @@ class DDPG(A2C):
         else:
             warmup = False
         lr_actor, lr_critic = cur_lr, cur_lr * self.v_coef
-        obs, acts, next_obs, rs, dones = self.trans_buffer.sample_transition()
         # summary: loss_v, loss_p, loss, grad_norm_v, grad_norm_p
         summary = []
         for _ in range(self.n_update):
+            obs, acts, next_obs, rs, dones = self.trans_buffer.sample_transition()
             val = self.policy.backward(self.sess, obs, acts, next_obs, dones, rs,
                                        lr_critic, lr_actor, warmup=warmup)
             summary.append(val)
         return list(np.mean(np.array(summary), axis=0))
 
     def forward(self, ob, mode='explore'):
+        # compeltely random exploration during warmup
+        if (mode == 'explore') and (self.trans_buffer.size < self.n_warmup):
+            return np.random.uniform(-1, 1, self.n_a)
         return self.policy.forward(self.sess, ob, mode=mode)
 
     def init_train(self):
@@ -159,16 +252,6 @@ class DDPG(A2C):
             self.policy = DDPGFCPolicy(n_s, n_a, n_batch, n_fc, noise_generator)
         else:
             self.policy = None
-
-    def _init_scheduler(self, model_config):
-        lr_init = model_config.getfloat('LR_INIT')
-        lr_decay = model_config.get('LR_DECAY')
-        if lr_decay == 'constant':
-            self.lr_scheduler = Scheduler(lr_init, decay=lr_decay)
-        else:
-            lr_min = model_config.getfloat('LR_MIN')
-            self.lr_scheduler = Scheduler(lr_init, lr_min, self.total_step,
-                                          decay=lr_decay)
 
     def _init_train(self, model_config):
         max_grad_norm = model_config.getfloat('MAX_GRAD_NORM')

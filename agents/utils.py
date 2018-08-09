@@ -232,6 +232,45 @@ class OnPolicyBuffer(ExpBuffer):
         self.Advs = Advs
 
 
+class PPOBuffer(OnPolicyBuffer):
+    def __init__(self, gamma):
+        self.gamma = gamma
+        self.reset()
+
+    def add_transition(self, ob, a, r, v, done, logprob):
+        self.obs.append(ob)
+        self.acts.append(a)
+        self.rs.append(r)
+        self.vs.append(v)
+        self.dones.append(done)
+        self.logprobs.append(logprob)
+
+    def reset(self, done=False):
+        # the done before each step is required
+        self.obs = []
+        self.acts = []
+        self.rs = []
+        self.vs = []
+        self.logprobs = []
+        self.dones = [done]
+
+    def sample_transition(self, R, discrete=True):
+        self._add_R_Adv(R)
+        obs = np.array(self.obs, dtype=np.float32)
+        if discrete:
+            acts = np.array(self.acts, dtype=np.int32)
+        else:
+            acts = np.array(self.acts, dtype=np.float32)
+        Rs = np.array(self.Rs, dtype=np.float32)
+        Advs = np.array(self.Advs, dtype=np.float32)
+        Vs = np.array(self.vs, dtype=np.float32)
+        Logprobs = np.array(self.logprobs, dtype=np.float32)
+        # use pre-step dones here
+        dones = np.array(self.dones[:-1], dtype=np.bool)
+        self.reset(self.dones[-1])
+        return obs, acts, dones, Rs, Advs, Vs, Logprobs
+
+
 class ReplayBuffer(ExpBuffer):
     def __init__(self, buffer_size, batch_size):
         self.buffer_size = buffer_size
@@ -244,7 +283,7 @@ class ReplayBuffer(ExpBuffer):
         if self.cum_size < self.buffer_size:
             self.buffer.append(experience)
         else:
-            ind = self.cum_size % self.buffer_size
+            ind = int(self.cum_size % self.buffer_size)
             self.buffer[ind] = experience
         self.cum_size += 1
 
@@ -270,7 +309,7 @@ class ReplayBuffer(ExpBuffer):
 util functions
 """
 class Scheduler:
-    def __init__(self, val_init, val_min, total_step, decay='linear'):
+    def __init__(self, val_init, val_min=0, total_step=0, decay='linear'):
         self.val = val_init
         self.N = float(total_step)
         self.val_min = val_min
@@ -286,7 +325,7 @@ class Scheduler:
 
 
 class OUNoise:
-    def __init__(self, theta=0.15, sigma=0.1):
+    def __init__(self, theta=0.15, sigma=0.2):
         self.name = 'ou'
         self.theta = theta
         self.sigma = sigma

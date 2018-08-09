@@ -7,9 +7,8 @@ import signal
 import tensorflow as tf
 import threading
 
-from agents.models import A2C, DDPG
+from agents.models import A2C, DDPG, PPO
 from envs.wrapper import GymEnv
-from envs.drone_wrapper import DroneEnv
 from train import Trainer, AsyncTrainer, Evaluator
 from utils import *
 
@@ -34,10 +33,7 @@ def gym_train(parser, algo):
     num_env = parser.getint('TRAIN_CONFIG', 'NUM_ENV')
     env_name = parser.get('ENV_CONFIG', 'NAME')
     is_discrete = parser.getboolean('ENV_CONFIG', 'DISCRETE')
-    if parser.getboolean('ENV_CONFIG', 'ISDRONEENV'):
-        env = DroneEnv(env_name, is_discrete)
-    else:
-        env = GymEnv(env_name, is_discrete)
+    env = GymEnv(env_name, is_discrete)
     env.seed(seed)
     n_a = env.n_a
     n_s = env.n_s
@@ -52,6 +48,9 @@ def gym_train(parser, algo):
     sess = tf.Session(config=config)
     if algo == 'a2c':
         global_model = A2C(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'],
+                           discrete=is_discrete)
+    elif algo == 'ppo':
+        global_model = PPO(sess, n_s, n_a, total_step, model_config=parser['MODEL_CONFIG'],
                            discrete=is_discrete)
     elif algo == 'ddpg':
         assert(not is_discrete)
@@ -70,26 +69,33 @@ def gym_train(parser, algo):
         trainer = Trainer(env, global_model, save_path, summary_writer, global_counter, model_summary)
         trainers.append(trainer)
     else:
-        assert(algo == 'a2c')
+        assert(algo in ['a2c', 'ppo'])
         # asynchronous training
         lr_scheduler = global_model.lr_scheduler
         beta_scheduler = global_model.beta_scheduler
         optimizer = global_model.optimizer
         lr = global_model.lr
-        models = []
-        wt_summary = global_model.policy.summary
+        clip_scheduler = None
+        if algo == 'ppo':
+            clip = global_model.clip
+            clip_scheduler = global_model.clip_scheduler
+        wt_summary = None
         reward_summary = None
-        # initialize model to update graph
-        for i in range(num_env):
-            models.append(A2C(sess, n_s, n_a, total_step, i_thread=i, optimizer=optimizer,
-                              lr=lr, model_config=parser['MODEL_CONFIG'], discrete=is_discrete))
-        summary_writer = tf.summary.FileWriter(log_path, sess.graph)
+        summary_writer = tf.summary.FileWriter(log_path)
+
         for i in range(num_env):
             env = GymEnv(env_name, is_discrete)
             env.seed(seed + i)
-            trainer = AsyncTrainer(env, models[i], save_path, summary_writer, global_counter,
+            if algo == 'a2c':
+                model = A2C(sess, n_s, n_a, total_step, i_thread=i, optimizer=optimizer,
+                            lr=lr, model_config=parser['MODEL_CONFIG'], discrete=is_discrete)
+            else:
+                model = PPO(sess, n_s, n_a, total_step, i_thread=i, optimizer=optimizer,
+                            lr=lr, clip=clip, model_config=parser['MODEL_CONFIG'], discrete=is_discrete)
+
+            trainer = AsyncTrainer(env, model, save_path, summary_writer, global_counter,
                                    i, lr_scheduler, beta_scheduler, model_summary, wt_summary,
-                                   reward_summary=reward_summary)
+                                   reward_summary=reward_summary, clip_scheduler=clip_scheduler)
             if i == 0:
                 reward_summary = (trainer.reward_summary, trainer.total_reward)
             trainers.append(trainer)
@@ -111,8 +117,6 @@ def gym_train(parser, algo):
     coord.request_stop()
     coord.join(threads)
     save_flag = input('save final model? Y/N: ')
-    if parser.getboolean('ENV_CONFIG', 'ISDRONEENV'):
-        env.get_results_df().to_csv(base_dir + 'model_statistics.csv')
     if save_flag.lower().startswith('y'):
         print('saving model at step %d ...' % global_counter.cur_step)
         global_model.save(saver, save_path + 'checkpoint', global_counter.cur_step)
@@ -122,10 +126,7 @@ def gym_evaluate(parser, n_episode, algo):
     seed = parser.getint('TRAIN_CONFIG', 'SEED')
     env_name = parser.get('ENV_CONFIG', 'NAME')
     is_discrete = parser.getboolean('ENV_CONFIG', 'DISCRETE')
-    if parser.getboolean('ENV_CONFIG', 'ISDRONEENV'):
-        env = DroneEnv(env_name, is_discrete)
-    else:
-        env = GymEnv(env_name, is_discrete)
+    env = GymEnv(env_name, is_discrete)
     env.seed(seed)
     n_a = env.n_a
     n_s = env.n_s
@@ -133,6 +134,9 @@ def gym_evaluate(parser, n_episode, algo):
     total_step = int(parser.getfloat('TRAIN_CONFIG', 'MAX_STEP'))
     if algo == 'a2c':
         model = A2C(sess, n_s, n_a, -1, model_config=parser['MODEL_CONFIG'],
+                    discrete=is_discrete)
+    elif algo == 'ppo':
+        model = PPO(sess, n_s, n_a, -1, model_config=parser['MODEL_CONFIG'],
                     discrete=is_discrete)
     elif algo == 'ddpg':
         assert(not is_discrete)
