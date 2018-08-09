@@ -33,7 +33,7 @@ MountainCarContinuous      | MountainCar
 1. The default 500 maximum episode length is too short for DDPG to explore a successful trace so it is relaxed to 2000 in this comparison. 
 2. The convergence comparison may not be meaningful since it mostly depends how fast the agent could explore a sucessful trace to get the sparse reward, under a random behavior policy.
 3. DDPG training takes much longer time, as the in-memory replay buffer grows during training.
-![](./docs/contcar_comp.png =200x150)
+![](./docs/contcar_comp.png)
 
 
 
