@@ -5,7 +5,7 @@ The implementation of deepRL agents for both discrete and continuous controls, w
 ### Supported algorithms
 * [A2C](https://arxiv.org/abs/1602.01783)
 * [DDPG](https://arxiv.org/abs/1509.02971)
-* [PPO(clip)](https://arxiv.org/abs/1707.06347)
+* [PPO (clip)](https://arxiv.org/abs/1707.06347)
 * [Dueling Q (ongoing)](https://arxiv.org/abs/1511.06581)
 
 ### Supported NN structures
@@ -19,7 +19,8 @@ In config-path, the variable BASE DIR has the directory where results are presen
 To monitor progress on tensorboard, type `python -m tensorflow.tensorboard --logdir=.` which will launch tensorboard and you can monitor progress on a browser window. Some example plots are below.
 
 ## Example results
-### A2C performance on selected gym environments. Detailed config files are located under `./docs`.
+### A2C on selected gym environments.
+Detailed config files are located under `./docs`.
 
 **continuous control**     | discrete control
 :-------------------------:|:--------------------------:
@@ -28,6 +29,11 @@ Pendulum                   | Acrobot
 MountainCarContinuous      | MountainCar
 ![](./docs/contcar.png)    | ![](./docs/car.png)
 
+### A2C, PPO, and DDPG on `MountainCarContinuous` environment.
+1. The default 500 maximum episode length is too short for DDPG to explore a successful trace so it is relaxed to 2000 in this comparison. 
+2. The convergence comparison may not be meaningful since it mostly depends how fast the agent could explore a sucessful trace to get the sparse reward, under a random behavior policy.
+3. DDPG training takes much longer time, as the in-memory replay buffer grows during training.
+![](./docs/contcar_comp.png)
 
 
 

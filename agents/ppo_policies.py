@@ -83,12 +83,12 @@ class PPOPolicy(A2CPolicy):
         return policy_loss, entropy_loss
 
     def _value_loss(self):
-        # This should be better than original PPO clipping
-        v_clip = self.OLDV + tf.clip_by_value(self.v - self.OLDV, -self.clip * self.OLDV,
-                                              self.clip * self.OLDV)
+        # TODO: better usage on v_old
+        # v_clip = self.OLDV + tf.clip_by_value(self.v - self.OLDV, -self.clip * self.OLDV,
+        #                                       self.clip * self.OLDV)
         v_loss = tf.square(self.R - self.v)
-        v_loss_clip = tf.square(self.R - v_clip)
-        return tf.reduce_mean(tf.maximum(v_loss, v_loss_clip)) * 0.5
+        # v_loss_clip = tf.square(self.R - v_clip)
+        return tf.reduce_mean(v_loss) * 0.5
 
 
 class PPOLstmPolicy(PPOPolicy):

@@ -283,7 +283,7 @@ class ReplayBuffer(ExpBuffer):
         if self.cum_size < self.buffer_size:
             self.buffer.append(experience)
         else:
-            ind = self.cum_size % self.buffer_size
+            ind = int(self.cum_size % self.buffer_size)
             self.buffer[ind] = experience
         self.cum_size += 1
 
@@ -325,7 +325,7 @@ class Scheduler:
 
 
 class OUNoise:
-    def __init__(self, theta=0.15, sigma=0.1):
+    def __init__(self, theta=0.15, sigma=0.2):
         self.name = 'ou'
         self.theta = theta
         self.sigma = sigma

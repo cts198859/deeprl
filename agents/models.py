@@ -197,6 +197,7 @@ class DDPG(A2C):
         self.n_warmup = model_config.getfloat('WARMUP_STEP')
         self.n_step = model_config.getint('NUM_STEP')
         self._init_policy(n_s, n_a, model_config)
+        self.n_a = n_a
         if total_step > 0:
             self.lr_scheduler = self._init_scheduler(model_config)
             self._init_train(model_config)
@@ -224,6 +225,9 @@ class DDPG(A2C):
         return list(np.mean(np.array(summary), axis=0))
 
     def forward(self, ob, mode='explore'):
+        # compeltely random exploration during warmup
+        if (mode == 'explore') and (self.trans_buffer.size < self.n_warmup):
+            return np.random.uniform(-1, 1, self.n_a)
         return self.policy.forward(self.sess, ob, mode=mode)
 
     def init_train(self):
