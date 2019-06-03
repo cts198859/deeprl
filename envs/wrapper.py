@@ -1,10 +1,20 @@
 import gym
 import numpy as np
+import sys, os
 
+TASK_ROOT_DIR=os.environ['TASK_ROOT_DIR']
+sys.path.append(TASK_ROOT_DIR + '/image-based-lqr/')
+
+from modified_LQR_env import *
 
 class GymEnv:
     def __init__(self, name, discrete=True):
-        env = gym.make(name)
+        
+        if name == 'LQR':
+            env = LQRCarEnv({})
+        else:
+            env = gym.make(name)
+
         self.discrete = discrete
         if discrete:
             self.n_a = env.action_space.n

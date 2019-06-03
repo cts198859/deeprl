@@ -12,6 +12,12 @@ from envs.wrapper import GymEnv
 from train import Trainer, AsyncTrainer, Evaluator
 from utils import *
 
+import sys, os
+
+TASK_ROOT_DIR=os.environ['TASK_ROOT_DIR']
+sys.path.append(TASK_ROOT_DIR + '/image-based-lqr/')
+
+from modified_LQR_env import *
 
 def parse_args():
     default_config_path = '/Users/tchu/Documents/Uhana/remote/deeprl/config.ini'
@@ -33,7 +39,14 @@ def gym_train(parser, algo):
     num_env = parser.getint('TRAIN_CONFIG', 'NUM_ENV')
     env_name = parser.get('ENV_CONFIG', 'NAME')
     is_discrete = parser.getboolean('ENV_CONFIG', 'DISCRETE')
+
+    print(' ')
+    print('STARTING TO TRAIN: ', env_name)
+    print('is discrete: ', is_discrete)
+    print(' ')
+
     env = GymEnv(env_name, is_discrete)
+    
     env.seed(seed)
     n_a = env.n_a
     n_s = env.n_s
@@ -84,6 +97,7 @@ def gym_train(parser, algo):
         summary_writer = tf.summary.FileWriter(log_path)
 
         for i in range(num_env):
+
             env = GymEnv(env_name, is_discrete)
             env.seed(seed + i)
             if algo == 'a2c':
@@ -127,6 +141,7 @@ def gym_evaluate(parser, n_episode, algo):
     env_name = parser.get('ENV_CONFIG', 'NAME')
     is_discrete = parser.getboolean('ENV_CONFIG', 'DISCRETE')
     env = GymEnv(env_name, is_discrete)
+
     env.seed(seed)
     n_a = env.n_a
     n_s = env.n_s
